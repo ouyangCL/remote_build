@@ -2,7 +2,7 @@
   <el-container class="dashboard-container">
     <el-aside width="200px">
       <div class="logo">
-        <h3>DevOps Platform</h3>
+        <h3>运维平台</h3>
       </div>
       <el-menu
         :default-active="activeMenu"
@@ -13,23 +13,23 @@
       >
         <el-menu-item index="/deploy">
           <el-icon><Upload /></el-icon>
-          <span>Deploy</span>
+          <span>部署</span>
         </el-menu-item>
         <el-menu-item index="/history">
           <el-icon><Clock /></el-icon>
-          <span>History</span>
+          <span>历史</span>
         </el-menu-item>
         <el-menu-item index="/projects" v-if="isAdmin">
           <el-icon><Folder /></el-icon>
-          <span>Projects</span>
+          <span>项目</span>
         </el-menu-item>
         <el-menu-item index="/servers" v-if="isAdmin">
           <el-icon><Monitor /></el-icon>
-          <span>Servers</span>
+          <span>服务器</span>
         </el-menu-item>
         <el-menu-item index="/server-groups" v-if="isAdmin">
           <el-icon><Files /></el-icon>
-          <span>Server Groups</span>
+          <span>服务器组</span>
         </el-menu-item>
       </el-menu>
     </el-aside>
@@ -39,7 +39,7 @@
         <div class="header-content">
           <span>{{ authStore.user?.username }}</span>
           <el-tag :type="roleType">{{ authStore.user?.role }}</el-tag>
-          <el-button @click="handleLogout" text>Logout</el-button>
+          <el-button @click="handleLogout" text>退出登录</el-button>
         </div>
       </el-header>
 

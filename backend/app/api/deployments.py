@@ -102,7 +102,7 @@ async def get_deployment(
         "id": deployment.id,
         "project_id": deployment.project_id,
         "branch": deployment.branch,
-        "status": deployment.status.value,
+        "status": deployment.status.value if hasattr(deployment.status, "value") else deployment.status,
         "commit_hash": deployment.commit_hash,
         "commit_message": deployment.commit_message,
         "error_message": deployment.error_message,
@@ -112,7 +112,7 @@ async def get_deployment(
         "project": {
             "id": deployment.project.id,
             "name": deployment.project.name,
-            "project_type": deployment.project.project_type.value,
+            "project_type": deployment.project.project_type.value if hasattr(deployment.project.project_type, "value") else deployment.project.project_type,
         } if deployment.project else None,
         "server_groups": [
             {"id": sg.id, "name": sg.name}
@@ -123,7 +123,7 @@ async def get_deployment(
                 "id": log.id,
                 "level": log.level,
                 "content": log.content,
-                "timestamp": log.timestamp.isoformat(),
+                "timestamp": log.created_at.isoformat(),
             }
             for log in deployment.logs[:500]
         ],

@@ -2,26 +2,26 @@
   <div class="login-container">
     <el-card class="login-card">
       <template #header>
-        <h2>DevOps Deployment Platform</h2>
+        <h2>运维部署平台</h2>
       </template>
 
       <el-form :model="form" :rules="rules" ref="formRef" label-width="80px">
-        <el-form-item label="Username" prop="username">
-          <el-input v-model="form.username" placeholder="Enter username" />
+        <el-form-item label="用户名" prop="username">
+          <el-input v-model="form.username" placeholder="请输入用户名" />
         </el-form-item>
 
-        <el-form-item label="Password" prop="password">
+        <el-form-item label="密码" prop="password">
           <el-input
             v-model="form.password"
             type="password"
-            placeholder="Enter password"
+            placeholder="请输入密码"
             @keyup.enter="handleLogin"
           />
         </el-form-item>
 
         <el-form-item>
           <el-button type="primary" @click="handleLogin" :loading="loading" style="width: 100%">
-            Login
+            登录
           </el-button>
         </el-form-item>
       </el-form>
@@ -56,8 +56,8 @@ const form = reactive({
 })
 
 const rules = {
-  username: [{ required: true, message: 'Please enter username', trigger: 'blur' }],
-  password: [{ required: true, message: 'Please enter password', trigger: 'blur' }],
+  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
 }
 
 async function handleLogin() {
@@ -68,7 +68,7 @@ async function handleLogin() {
 
     await authStore.login(form.username, form.password)
 
-    ElMessage.success('Login successful')
+    ElMessage.success('登录成功')
     router.push('/')
   } catch (err: any) {
     if (err?.message) {

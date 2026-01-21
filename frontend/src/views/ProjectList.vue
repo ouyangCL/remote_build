@@ -3,19 +3,19 @@
     <el-card>
       <template #header>
         <div class="header">
-          <span>Projects</span>
+          <span>项目管理</span>
           <el-button type="primary" @click="handleCreate" :icon="Plus">
-            New Project
+            新建项目
           </el-button>
         </div>
       </template>
 
       <el-table :data="projects" v-loading="loading">
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" label="Name" />
-        <el-table-column prop="git_url" label="Git URL" show-overflow-tooltip />
-        <el-table-column prop="project_type" label="Type" width="100" />
-        <el-table-column label="Actions" width="150" fixed="right">
+        <el-table-column prop="name" label="项目名称" />
+        <el-table-column prop="git_url" label="Git地址" show-overflow-tooltip />
+        <el-table-column prop="project_type" label="类型" width="100" />
+        <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="handleEdit(row)" :icon="Edit" />
             <el-button
@@ -32,30 +32,30 @@
     <!-- Form Dialog -->
     <el-dialog
       v-model="dialogVisible"
-      :title="isEdit ? 'Edit Project' : 'New Project'"
+      :title="isEdit ? '编辑项目' : '新建项目'"
       width="600px"
     >
       <el-form :model="form" :rules="rules" ref="formRef" label-width="120px">
-        <el-form-item label="Project Name" prop="name">
+        <el-form-item label="项目名称" prop="name">
           <el-input v-model="form.name" />
         </el-form-item>
 
-        <el-form-item label="Description">
+        <el-form-item label="描述">
           <el-input v-model="form.description" type="textarea" />
         </el-form-item>
 
-        <el-form-item label="Git URL" prop="git_url">
+        <el-form-item label="Git地址" prop="git_url">
           <el-input v-model="form.git_url" placeholder="https://github.com/user/repo.git" />
         </el-form-item>
 
-        <el-form-item label="Project Type" prop="project_type">
+        <el-form-item label="项目类型" prop="project_type">
           <el-select v-model="form.project_type" style="width: 100%">
-            <el-option label="Frontend" value="frontend" />
-            <el-option label="Backend" value="backend" />
+            <el-option label="前端" value="frontend" />
+            <el-option label="后端" value="backend" />
           </el-select>
         </el-form-item>
 
-        <el-form-item label="Build Script" prop="build_script">
+        <el-form-item label="构建脚本" prop="build_script">
           <el-input
             v-model="form.build_script"
             type="textarea"
@@ -63,19 +63,19 @@
           />
         </el-form-item>
 
-        <el-form-item label="Output Directory" prop="output_dir">
+        <el-form-item label="输出目录" prop="output_dir">
           <el-input v-model="form.output_dir" placeholder="dist" />
         </el-form-item>
 
-        <el-form-item label="Restart Script" prop="deploy_script_path">
+        <el-form-item label="重启脚本" prop="deploy_script_path">
           <el-input v-model="form.deploy_script_path" placeholder="/opt/restart.sh" />
         </el-form-item>
       </el-form>
 
       <template #footer>
-        <el-button @click="dialogVisible = false">Cancel</el-button>
+        <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="handleSubmit" :loading="submitting">
-          {{ isEdit ? 'Update' : 'Create' }}
+          {{ isEdit ? '更新' : '创建' }}
         </el-button>
       </template>
     </el-dialog>
@@ -86,7 +86,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Edit, Delete } from '@element-plus/icons-vue'
-import api from '@/api'
+import { projects as projectsApi } from '@/api'
 import type { Project } from '@/types'
 
 const projects = ref<Project[]>([])
@@ -108,16 +108,16 @@ const form = reactive({
 })
 
 const rules = {
-  name: [{ required: true, message: 'Required', trigger: 'blur' }],
-  git_url: [{ required: true, message: 'Required', trigger: 'blur' }],
-  project_type: [{ required: true, message: 'Required', trigger: 'change' }],
-  build_script: [{ required: true, message: 'Required', trigger: 'blur' }],
+  name: [{ required: true, message: '必填', trigger: 'blur' }],
+  git_url: [{ required: true, message: '必填', trigger: 'blur' }],
+  project_type: [{ required: true, message: '必填', trigger: 'change' }],
+  build_script: [{ required: true, message: '必填', trigger: 'blur' }],
 }
 
 async function loadData() {
   loading.value = true
   try {
-    projects.value = await api.projects.list()
+    projects.value = await projectsApi.list()
   } finally {
     loading.value = false
   }
@@ -150,11 +150,11 @@ async function handleSubmit() {
     submitting.value = true
 
     if (isEdit.value && currentProject.value) {
-      await api.projects.update(currentProject.value.id, form)
-      ElMessage.success('Project updated')
+      await projectsApi.update(currentProject.value.id, form)
+      ElMessage.success('项目已更新')
     } else {
-      await api.projects.create(form)
-      ElMessage.success('Project created')
+      await projectsApi.create(form)
+      ElMessage.success('项目已创建')
     }
 
     dialogVisible.value = false
@@ -166,12 +166,12 @@ async function handleSubmit() {
 
 async function handleDelete(project: Project) {
   try {
-    await ElMessageBox.confirm(`Delete project "${project.name}"?`, 'Confirm', {
+    await ElMessageBox.confirm(`确定删除项目 "${project.name}"?`, '确认', {
       type: 'warning',
     })
 
-    await api.projects.delete(project.id)
-    ElMessage.success('Project deleted')
+    await projectsApi.delete(project.id)
+    ElMessage.success('项目已删除')
     loadData()
   } catch {
     // User cancelled

@@ -3,35 +3,35 @@
     <el-card>
       <template #header>
         <div class="header">
-          <span>Deployment History</span>
-          <el-button @click="loadData" :icon="Refresh">Refresh</el-button>
+          <span>部署历史</span>
+          <el-button @click="loadData" :icon="Refresh">刷新</el-button>
         </div>
       </template>
 
       <el-table :data="deployments" v-loading="loading">
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="project.name" label="Project" />
-        <el-table-column prop="branch" label="Branch" />
-        <el-table-column label="Status" width="120">
+        <el-table-column prop="project.name" label="项目" />
+        <el-table-column prop="branch" label="分支" />
+        <el-table-column label="状态" width="120">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">
-              {{ row.status }}
+              {{ getStatusLabel(row.status) }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="created_at" label="Time" width="180">
+        <el-table-column prop="created_at" label="时间" width="180">
           <template #default="{ row }">
             {{ formatTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="150" fixed="right">
+        <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <el-button
               size="small"
               @click="handleView(row)"
               :icon="View"
             >
-              View
+              查看
             </el-button>
             <el-button
               size="small"
@@ -40,7 +40,7 @@
               :icon="RefreshLeft"
               :disabled="row.status !== 'success'"
             >
-              Rollback
+              回滚
             </el-button>
           </template>
         </el-table-column>
@@ -50,7 +50,7 @@
     <!-- Detail Dialog -->
     <el-dialog
       v-model="detailVisible"
-      title="Deployment Details"
+      title="部署详情"
       width="800px"
     >
       <div v-if="currentDeployment">
@@ -58,23 +58,23 @@
           <el-descriptions-item label="ID">
             {{ currentDeployment.id }}
           </el-descriptions-item>
-          <el-descriptions-item label="Project">
+          <el-descriptions-item label="项目">
             {{ currentDeployment.project?.name }}
           </el-descriptions-item>
-          <el-descriptions-item label="Branch">
+          <el-descriptions-item label="分支">
             {{ currentDeployment.branch }}
           </el-descriptions-item>
-          <el-descriptions-item label="Status">
+          <el-descriptions-item label="状态">
             <el-tag :type="getStatusType(currentDeployment.status)">
-              {{ currentDeployment.status }}
+              {{ getStatusLabel(currentDeployment.status) }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="Commit" :span="2">
+          <el-descriptions-item label="提交" :span="2">
             {{ currentDeployment.commit_hash?.substring(0, 8) }} - {{ currentDeployment.commit_message }}
           </el-descriptions-item>
         </el-descriptions>
 
-        <el-divider>Logs</el-divider>
+        <el-divider>日志</el-divider>
 
         <div class="log-viewer">
           <div
@@ -98,7 +98,7 @@
 import { ref, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Refresh, View, RefreshLeft } from '@element-plus/icons-vue'
-import api from '@/api'
+import { deployments as deploymentsApi } from '@/api'
 import type { Deployment } from '@/types'
 
 const deployments = ref<Deployment[]>([])
@@ -109,31 +109,31 @@ const currentDeployment = ref<Deployment | null>(null)
 async function loadData() {
   loading.value = true
   try {
-    deployments.value = await api.deployments.list()
+    deployments.value = await deploymentsApi.list()
   } finally {
     loading.value = false
   }
 }
 
 async function handleView(deployment: Deployment) {
-  currentDeployment.value = await api.deployments.get(deployment.id)
+  currentDeployment.value = await deploymentsApi.get(deployment.id)
   detailVisible.value = true
 }
 
 async function handleRollback(deployment: Deployment) {
   try {
     await ElMessageBox.confirm(
-      `Rollback to deployment ${deployment.id}?`,
-      'Confirm Rollback',
+      `确定回滚到部署 ${deployment.id}?`,
+      '确认回滚',
       {
         type: 'warning',
       }
     )
 
     const groupIds = deployment.server_groups?.map(g => g.id) || []
-    await api.deployments.rollback(deployment.id, groupIds)
+    await deploymentsApi.rollback(deployment.id, groupIds)
 
-    ElMessage.success('Rollback started')
+    ElMessage.success('回滚已启动')
     loadData()
   } catch (err) {
     // User cancelled
@@ -150,6 +150,18 @@ function getStatusType(status: string) {
     deploying: 'primary',
   }
   return types[status] || ''
+}
+
+function getStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    success: '成功',
+    failed: '失败',
+    cancelled: '已取消',
+    pending: '等待中',
+    building: '构建中',
+    deploying: '部署中',
+  }
+  return labels[status] || status
 }
 
 function formatTime(time: string) {

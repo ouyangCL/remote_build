@@ -1,4 +1,6 @@
 """Server schemas."""
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -37,8 +39,8 @@ class ServerResponse(ServerBase):
 
     id: int
     is_active: bool
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
 
     model_config = {"from_attributes": True}
 
@@ -68,8 +70,8 @@ class ServerGroupResponse(ServerGroupBase):
     """Server group response schema."""
 
     id: int
-    created_at: str
-    updated_at: str
+    created_at: datetime
+    updated_at: datetime
     servers: list[ServerResponse] = []
 
     model_config = {"from_attributes": True}

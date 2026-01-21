@@ -3,30 +3,30 @@
     <el-card>
       <template #header>
         <div class="header">
-          <span>Servers</span>
+          <span>服务器列表</span>
           <el-button type="primary" @click="handleCreate" :icon="Plus">
-            New Server
+            新建服务器
           </el-button>
         </div>
       </template>
 
       <el-table :data="servers" v-loading="loading">
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="name" label="Name" />
-        <el-table-column prop="host" label="Host" />
-        <el-table-column prop="port" label="Port" width="80" />
-        <el-table-column prop="auth_type" label="Auth Type" width="100" />
-        <el-table-column label="Status" width="100">
+        <el-table-column prop="name" label="名称" />
+        <el-table-column prop="host" label="主机" />
+        <el-table-column prop="port" label="端口" width="80" />
+        <el-table-column prop="auth_type" label="认证类型" width="100" />
+        <el-table-column label="状态" width="100">
           <template #default="{ row }">
             <el-tag :type="row.is_active ? 'success' : 'info'">
-              {{ row.is_active ? 'Active' : 'Inactive' }}
+              {{ row.is_active ? '活跃' : '未激活' }}
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="Actions" width="200" fixed="right">
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="handleTest(row)" :icon="Connection">
-              Test
+              测试连接
             </el-button>
             <el-button size="small" @click="handleEdit(row)" :icon="Edit" />
             <el-button
@@ -43,38 +43,38 @@
     <!-- Form Dialog -->
     <el-dialog
       v-model="dialogVisible"
-      :title="isEdit ? 'Edit Server' : 'New Server'"
+      :title="isEdit ? '编辑服务器' : '新建服务器'"
       width="600px"
     >
       <el-form :model="form" :rules="rules" ref="formRef" label-width="120px">
-        <el-form-item label="Server Name" prop="name">
+        <el-form-item label="服务器名称" prop="name">
           <el-input v-model="form.name" />
         </el-form-item>
 
-        <el-form-item label="Host" prop="host">
+        <el-form-item label="主机地址" prop="host">
           <el-input v-model="form.host" placeholder="192.168.1.100" />
         </el-form-item>
 
-        <el-form-item label="Port" prop="port">
+        <el-form-item label="端口" prop="port">
           <el-input-number v-model="form.port" :min="1" :max="65535" />
         </el-form-item>
 
-        <el-form-item label="Username" prop="username">
+        <el-form-item label="用户名" prop="username">
           <el-input v-model="form.username" />
         </el-form-item>
 
-        <el-form-item label="Auth Type" prop="auth_type">
+        <el-form-item label="认证类型" prop="auth_type">
           <el-select v-model="form.auth_type" style="width: 100%">
-            <el-option label="Password" value="password" />
-            <el-option label="SSH Key" value="ssh_key" />
+            <el-option label="密码" value="password" />
+            <el-option label="SSH密钥" value="ssh_key" />
           </el-select>
         </el-form-item>
 
-        <el-form-item label="Password / Key" prop="auth_value">
+        <el-form-item label="密码/密钥" prop="auth_value">
           <el-input
             v-model="form.auth_value"
             :type="showPassword ? 'text' : 'password'"
-            placeholder="Password or SSH private key content"
+            placeholder="密码或SSH私钥内容"
           >
             <template #append>
               <el-button @click="showPassword = !showPassword" :icon="showPassword ? View : Hide" />
@@ -82,15 +82,15 @@
           </el-input>
         </el-form-item>
 
-        <el-form-item label="Deploy Path" prop="deploy_path">
+        <el-form-item label="部署路径" prop="deploy_path">
           <el-input v-model="form.deploy_path" placeholder="/opt/app" />
         </el-form-item>
       </el-form>
 
       <template #footer>
-        <el-button @click="dialogVisible = false">Cancel</el-button>
+        <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="handleSubmit" :loading="submitting">
-          {{ isEdit ? 'Update' : 'Create' }}
+          {{ isEdit ? '更新' : '创建' }}
         </el-button>
       </template>
     </el-dialog>
@@ -101,7 +101,7 @@
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Edit, Delete, Connection, View, Hide } from '@element-plus/icons-vue'
-import api from '@/api'
+import { servers as serversApi } from '@/api'
 import type { Server } from '@/types'
 
 const servers = ref<Server[]>([])
@@ -124,17 +124,17 @@ const form = reactive({
 })
 
 const rules = {
-  name: [{ required: true, message: 'Required', trigger: 'blur' }],
-  host: [{ required: true, message: 'Required', trigger: 'blur' }],
-  username: [{ required: true, message: 'Required', trigger: 'blur' }],
-  auth_type: [{ required: true, message: 'Required', trigger: 'change' }],
-  auth_value: [{ required: true, message: 'Required', trigger: 'blur' }],
+  name: [{ required: true, message: '必填', trigger: 'blur' }],
+  host: [{ required: true, message: '必填', trigger: 'blur' }],
+  username: [{ required: true, message: '必填', trigger: 'blur' }],
+  auth_type: [{ required: true, message: '必填', trigger: 'change' }],
+  auth_value: [{ required: true, message: '必填', trigger: 'blur' }],
 }
 
 async function loadData() {
   loading.value = true
   try {
-    servers.value = await api.servers.listServers()
+    servers.value = await serversApi.listServers()
   } finally {
     loading.value = false
   }
@@ -168,11 +168,11 @@ async function handleSubmit() {
     submitting.value = true
 
     if (isEdit.value && currentServer.value) {
-      await api.servers.updateServer(currentServer.value.id, form)
-      ElMessage.success('Server updated')
+      await serversApi.updateServer(currentServer.value.id, form)
+      ElMessage.success('服务器已更新')
     } else {
-      await api.servers.createServer(form)
-      ElMessage.success('Server created')
+      await serversApi.createServer(form)
+      ElMessage.success('服务器已创建')
     }
 
     dialogVisible.value = false
@@ -184,34 +184,34 @@ async function handleSubmit() {
 
 async function handleTest(server: Server) {
   const loading = ElMessage({
-    message: 'Testing connection...',
+    message: '正在测试连接...',
     type: 'info',
     duration: 0,
   })
 
   try {
-    const result = await api.servers.testConnection(server.id)
+    const result = await serversApi.testConnection(server.id)
     loading.close()
 
     if (result.success) {
-      ElMessage.success(result.message || 'Connection successful')
+      ElMessage.success(result.message || '连接成功')
     } else {
-      ElMessage.error(result.message || 'Connection failed')
+      ElMessage.error(result.message || '连接失败')
     }
   } catch {
     loading.close()
-    ElMessage.error('Connection test failed')
+    ElMessage.error('连接测试失败')
   }
 }
 
 async function handleDelete(server: Server) {
   try {
-    await ElMessageBox.confirm(`Delete server "${server.name}"?`, 'Confirm', {
+    await ElMessageBox.confirm(`确定删除服务器 "${server.name}"?`, '确认', {
       type: 'warning',
     })
 
-    await api.servers.deleteServer(server.id)
-    ElMessage.success('Server deleted')
+    await serversApi.deleteServer(server.id)
+    ElMessage.success('服务器已删除')
     loadData()
   } catch {
     // User cancelled

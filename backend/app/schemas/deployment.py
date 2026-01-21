@@ -1,4 +1,6 @@
 """Deployment schemas."""
+from datetime import datetime
+
 from pydantic import BaseModel, Field
 
 
@@ -20,7 +22,7 @@ class DeploymentResponse(BaseModel):
     commit_hash: str | None = None
     commit_message: str | None = None
     error_message: str | None = None
-    created_at: str
+    created_at: datetime
     created_by: int | None = None
     rollback_from: int | None = None
 

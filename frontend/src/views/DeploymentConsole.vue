@@ -4,14 +4,14 @@
       <el-col :span="10">
         <el-card>
           <template #header>
-            <span>New Deployment</span>
+            <span>新建部署</span>
           </template>
 
           <el-form :model="form" label-width="100px">
-            <el-form-item label="Project">
+            <el-form-item label="项目">
               <el-select
                 v-model="form.project_id"
-                placeholder="Select project"
+                placeholder="请选择项目"
                 @change="handleProjectChange"
                 style="width: 100%"
               >
@@ -24,10 +24,10 @@
               </el-select>
             </el-form-item>
 
-            <el-form-item label="Branch">
+            <el-form-item label="分支">
               <el-select
                 v-model="form.branch"
-                placeholder="Select branch"
+                placeholder="请选择分支"
                 :loading="loadingBranches"
                 style="width: 100%"
               >
@@ -40,10 +40,10 @@
               </el-select>
             </el-form-item>
 
-            <el-form-item label="Server Groups">
+            <el-form-item label="服务器组">
               <el-select
                 v-model="form.server_group_ids"
-                placeholder="Select server groups"
+                placeholder="请选择服务器组"
                 multiple
                 style="width: 100%"
               >
@@ -63,7 +63,7 @@
                 :loading="deploying"
                 :disabled="!canDeploy"
               >
-                Start Deployment
+                开始部署
               </el-button>
             </el-form-item>
           </el-form>
@@ -73,7 +73,7 @@
       <el-col :span="14">
         <el-card>
           <template #header>
-            <span>Deployment Logs</span>
+            <span>部署日志</span>
           </template>
 
           <div class="logs-container" ref="logsContainer">
@@ -86,7 +86,7 @@
               <span class="log-content">{{ log.content }}</span>
             </div>
 
-            <el-empty v-if="logs.length === 0 && !deploying" description="No logs yet" />
+            <el-empty v-if="logs.length === 0 && !deploying" description="暂无日志" />
           </div>
         </el-card>
       </el-col>
@@ -97,7 +97,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onUnmounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import api from '@/api'
+import { projects as projectsApi, servers as serversApi, deployments as deploymentsApi } from '@/api'
 import type { Project, ServerGroup, DeploymentLog } from '@/types'
 
 const projects = ref<Project[]>([])
@@ -121,8 +121,8 @@ const canDeploy = computed(
 let eventSource: EventSource | null = null
 
 async function loadData() {
-  projects.value = await api.projects.list()
-  serverGroups.value = await api.servers.listGroups()
+  projects.value = await projectsApi.list()
+  serverGroups.value = await serversApi.listGroups()
 }
 
 async function handleProjectChange() {
@@ -130,10 +130,10 @@ async function handleProjectChange() {
 
   loadingBranches.value = true
   try {
-    const result = await api.projects.getBranches(form.project_id)
+    const result = await projectsApi.getBranches(form.project_id)
     branches.value = result.branches
   } catch (err) {
-    ElMessage.error('Failed to load branches')
+    ElMessage.error('加载分支失败')
   } finally {
     loadingBranches.value = false
   }
@@ -144,16 +144,16 @@ async function handleDeploy() {
   logs.value = []
 
   try {
-    const deployment = await api.deployments.create({
+    const deployment = await deploymentsApi.create({
       project_id: form.project_id!,
       branch: form.branch,
       server_group_ids: form.server_group_ids,
     })
 
-    ElMessage.success('Deployment started')
+    ElMessage.success('部署已启动')
 
     // Connect to SSE for real-time logs
-    eventSource = api.deployments.streamLogs(deployment.id)
+    eventSource = deploymentsApi.streamLogs(deployment.id)
 
     eventSource.onmessage = (e) => {
       if (e.data === ': keepalive') return
@@ -174,7 +174,7 @@ async function handleDeploy() {
       eventSource?.close()
     }
   } catch (err) {
-    ElMessage.error('Failed to start deployment')
+    ElMessage.error('启动部署失败')
     deploying.value = false
   }
 }
