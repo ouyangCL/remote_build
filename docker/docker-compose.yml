@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ../backend
+      dockerfile: ../docker/Dockerfile.backend
+    container_name: devops-backend
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    environment:
+      - DATABASE_URL=postgresql://devops:devops123@db:5432/devops
+      - SECRET_KEY=change-this-in-production-use-a-long-random-string
+      - ENCRYPTION_KEY=change-this-in-production-32-bytes-minimum
+      - CORS_ORIGINS=http://localhost:5050
+    volumes:
+      - ./work:/app/work
+      - ./artifacts:/app/artifacts
+      - ./logs:/app/logs
+    depends_on:
+      - db
+    networks:
+      - devops-network
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: ../docker/Dockerfile.frontend
+    container_name: devops-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - devops-network
+
+  db:
+    image: postgres:15-alpine
+    container_name: devops-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=devops
+      - POSTGRES_USER=devops
+      - POSTGRES_PASSWORD=devops123
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - devops-network
+
+volumes:
+  postgres_data:
+
+networks:
+  devops-network:
+    driver: bridge
