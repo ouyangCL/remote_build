@@ -2,10 +2,11 @@
 import asyncio
 from typing import cast
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.models.audit_log import AuditAction
 from app.core.permissions import require_operator
 from app.db.session import get_db
 from app.dependencies import get_current_user
@@ -17,7 +18,9 @@ from app.schemas.deployment import (
     DeploymentCreate,
     DeploymentResponse,
 )
+from app.services.audit_service import create_audit_log
 from app.services.deploy_service import execute_deployment
+from app.services.environment_service import EnvironmentService
 from app.services.log_service import stream_deployment_logs
 from app.services.rollback_service import execute_rollback
 
@@ -27,14 +30,18 @@ router = APIRouter(prefix="/api/deployments", tags=["Deployments"])
 @router.get("", response_model=list[DeploymentResponse])
 async def list_deployments(
     project_id: int | None = None,
+    environment: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[Deployment]:
-    """List deployments, optionally filtered by project."""
+    """List deployments, optionally filtered by project and environment."""
     query = db.query(Deployment)
 
     if project_id:
         query = query.filter(Deployment.project_id == project_id)
+
+    if environment:
+        query = query.filter(Deployment.environment == environment)
 
     deployments = query.order_by(Deployment.created_at.desc()).limit(100).all()
     return cast(list[Deployment], deployments)
@@ -43,6 +50,7 @@ async def list_deployments(
 @router.post("", response_model=DeploymentResponse, status_code=status.HTTP_201_CREATED)
 async def create_deployment(
     deployment_data: DeploymentCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Deployment:
@@ -66,17 +74,39 @@ async def create_deployment(
             )
         server_groups.append(group)
 
-    # Create deployment
+    # Validate environment consistency
+    EnvironmentService.validate_deployment_environment(project, server_groups)
+
+    # Create deployment - inherit environment from project
     deployment = Deployment(
         project_id=deployment_data.project_id,
         branch=deployment_data.branch,
         status=DeploymentStatus.PENDING,
         created_by=current_user.id,
         server_groups=server_groups,
+        environment=project.environment,
     )
     db.add(deployment)
     db.commit()
     db.refresh(deployment)
+
+    # Log audit with environment info
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    create_audit_log(
+        db=db,
+        user_id=current_user.id,
+        action=AuditAction.DEPLOYMENT_CREATE,
+        resource_type="deployment",
+        resource_id=deployment.id,
+        details={
+            "project": project.name,
+            "branch": deployment_data.branch,
+            "environment": project.environment
+        },
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
 
     # Execute deployment in background
     asyncio.create_task(execute_deployment(deployment.id, db))
@@ -154,6 +184,7 @@ async def get_deployment_logs(
 async def rollback_deployment(
     deployment_id: int,
     rollback_data: dict,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> Deployment:
@@ -173,6 +204,14 @@ async def rollback_deployment(
             detail="Source deployment has no artifacts to rollback to",
         )
 
+    # Get project for environment validation
+    project = db.query(Project).filter(Project.id == source_deployment.project_id).first()
+    if not project:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
     # Validate server groups
     server_groups = []
     for group_id in rollback_data.get("server_group_ids", []):
@@ -184,7 +223,10 @@ async def rollback_deployment(
             )
         server_groups.append(group)
 
-    # Create rollback deployment
+    # Validate environment consistency
+    EnvironmentService.validate_deployment_environment(project, server_groups)
+
+    # Create rollback deployment - inherit environment from project
     rollback_deployment = Deployment(
         project_id=source_deployment.project_id,
         branch=source_deployment.branch,
@@ -192,10 +234,28 @@ async def rollback_deployment(
         created_by=current_user.id,
         rollback_from=deployment_id,
         server_groups=server_groups,
+        environment=project.environment,
     )
     db.add(rollback_deployment)
     db.commit()
     db.refresh(rollback_deployment)
+
+    # Log audit with environment info
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    create_audit_log(
+        db=db,
+        user_id=current_user.id,
+        action=AuditAction.DEPLOYMENT_ROLLBACK,
+        resource_type="deployment",
+        resource_id=rollback_deployment.id,
+        details={
+            "source_deployment_id": deployment_id,
+            "environment": project.environment
+        },
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
 
     # Execute rollback in background
     asyncio.create_task(execute_rollback(rollback_deployment.id, deployment_id, db))
@@ -206,6 +266,7 @@ async def rollback_deployment(
 @router.delete("/{deployment_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def cancel_deployment(
     deployment_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> None:
@@ -230,3 +291,17 @@ async def cancel_deployment(
 
     deployment.status = DeploymentStatus.CANCELLED
     db.commit()
+
+    # Log audit
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    create_audit_log(
+        db=db,
+        user_id=current_user.id,
+        action=AuditAction.DEPLOYMENT_CANCEL,
+        resource_type="deployment",
+        resource_id=deployment_id,
+        details={"branch": deployment.branch},
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )

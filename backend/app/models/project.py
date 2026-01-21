@@ -6,6 +6,7 @@ from sqlalchemy import String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+from app.models.environment import EnvironmentType
 
 if TYPE_CHECKING:
     from app.models.deployment import Deployment
@@ -34,6 +35,9 @@ class Project(Base, TimestampMixin):
     )
     output_dir: Mapped[str] = mapped_column(
         String(255), nullable=False, default="dist"
+    )
+    environment: Mapped[EnvironmentType] = mapped_column(
+        String(20), default=EnvironmentType.DEVELOPMENT, nullable=False, index=True
     )
 
     # Relationships

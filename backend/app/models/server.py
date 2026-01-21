@@ -14,6 +14,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+from app.models.environment import EnvironmentType
 
 if TYPE_CHECKING:
     from app.models.deployment import Deployment
@@ -73,6 +74,9 @@ class ServerGroup(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    environment: Mapped[EnvironmentType] = mapped_column(
+        String(20), default=EnvironmentType.DEVELOPMENT, nullable=False, index=True
+    )
 
     # Relationships
     servers: Mapped[list[Server]] = relationship(

@@ -31,6 +31,14 @@
           <el-icon><Files /></el-icon>
           <span>服务器组</span>
         </el-menu-item>
+        <el-menu-item index="/users" v-if="isAdmin">
+          <el-icon><User /></el-icon>
+          <span>用户管理</span>
+        </el-menu-item>
+        <el-menu-item index="/audit-logs" v-if="isAdmin">
+          <el-icon><Document /></el-icon>
+          <span>操作记录</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
 
@@ -53,6 +61,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import {
+  Upload,
+  Clock,
+  Folder,
+  Monitor,
+  Files,
+  User,
+  Document,
+} from '@element-plus/icons-vue'
 import { useAuthStore } from '@/stores/auth'
 
 const router = useRouter()

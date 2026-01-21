@@ -44,6 +44,18 @@ const routes: RouteRecordRaw[] = [
         name: 'ServerGroups',
         component: () => import('@/views/ServerGroupList.vue'),
       },
+      {
+        path: 'users',
+        name: 'Users',
+        component: () => import('@/views/UserList.vue'),
+        meta: { adminOnly: true },
+      },
+      {
+        path: 'audit-logs',
+        name: 'AuditLogs',
+        component: () => import('@/views/UserLogs.vue'),
+        meta: { adminOnly: true },
+      },
     ],
   },
 ]
@@ -66,7 +78,12 @@ router.beforeEach(async (to, _from, next) => {
     if (authStore.isAuthenticated && !authStore.user) {
       await authStore.fetchUser()
     }
-    next()
+    // 检查管理员权限
+    if (to.meta.adminOnly && authStore.user?.role !== 'admin') {
+      next('/')
+    } else {
+      next()
+    }
   }
 })
 

@@ -13,6 +13,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
+from app.models.environment import EnvironmentType
 
 if TYPE_CHECKING:
     from app.models.project import Project
@@ -62,6 +63,9 @@ class Deployment(Base, TimestampMixin):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    environment: Mapped[EnvironmentType] = mapped_column(
+        String(20), default=EnvironmentType.DEVELOPMENT, nullable=False, index=True
     )
 
     # Relationships

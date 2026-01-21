@@ -20,7 +20,19 @@
                   :key="project.id"
                   :label="project.name"
                   :value="project.id"
-                />
+                >
+                  <div class="project-option">
+                    <span>{{ project.name }}</span>
+                    <el-tag
+                      size="small"
+                      :type="getEnvironmentColor(project.environment)"
+                      :icon="getEnvironmentIcon(project.environment)"
+                      style="margin-left: 8px"
+                    >
+                      {{ getEnvironmentLabel(project.environment) }}
+                    </el-tag>
+                  </div>
+                </el-option>
               </el-select>
             </el-form-item>
 
@@ -48,12 +60,41 @@
                 style="width: 100%"
               >
                 <el-option
-                  v-for="group in serverGroups"
+                  v-for="group in filteredServerGroups"
                   :key="group.id"
                   :label="group.name"
                   :value="group.id"
-                />
+                  :disabled="isEnvironmentMismatch(group)"
+                >
+                  <div class="server-group-option">
+                    <span>{{ group.name }}</span>
+                    <el-tag
+                      size="small"
+                      :type="getEnvironmentColor(group.environment)"
+                      :icon="getEnvironmentIcon(group.environment)"
+                      style="margin-left: 8px"
+                    >
+                      {{ getEnvironmentLabel(group.environment) }}
+                    </el-tag>
+                  </div>
+                </el-option>
               </el-select>
+              <div v-if="selectedProject" class="form-tip">
+                <el-icon color="#409eff"><InfoFilled /></el-icon>
+                <span>
+                  仅显示与项目环境（{{ getEnvironmentLabel(selectedProject.environment) }}）匹配的服务器组
+                </span>
+              </div>
+              <el-alert
+                v-if="hasEnvironmentMismatch"
+                title="环境不匹配警告"
+                type="warning"
+                :closable="false"
+                show-icon
+                style="margin-top: 8px"
+              >
+                您选择了环境不匹配的服务器组，部署将被拒绝
+              </el-alert>
             </el-form-item>
 
             <el-form-item>
@@ -61,10 +102,20 @@
                 type="primary"
                 @click="handleDeploy"
                 :loading="deploying"
-                :disabled="!canDeploy"
+                :disabled="!canDeploy || hasEnvironmentMismatch"
               >
                 开始部署
               </el-button>
+              <el-alert
+                v-if="selectedProject?.environment === 'production'"
+                title="生产环境部署"
+                type="error"
+                :closable="false"
+                show-icon
+                style="margin-top: 12px"
+              >
+                即将部署到生产环境，请确认操作无误
+              </el-alert>
             </el-form-item>
           </el-form>
         </el-card>
@@ -97,8 +148,10 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onUnmounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
+import { InfoFilled } from '@element-plus/icons-vue'
 import { projects as projectsApi, servers as serversApi, deployments as deploymentsApi } from '@/api'
-import type { Project, ServerGroup, DeploymentLog } from '@/types'
+import { ENVIRONMENT_DISPLAY } from '@/types'
+import type { Project, ServerGroup, DeploymentLog, Environment } from '@/types'
 
 const projects = ref<Project[]>([])
 const serverGroups = ref<ServerGroup[]>([])
@@ -118,6 +171,48 @@ const canDeploy = computed(
   () => form.project_id && form.branch && form.server_group_ids.length > 0
 )
 
+const selectedProject = computed(() =>
+  projects.value.find(p => p.id === form.project_id) || null
+)
+
+const filteredServerGroups = computed(() => {
+  if (!selectedProject.value) {
+    return serverGroups.value
+  }
+  // 只显示与环境匹配的服务器组
+  return serverGroups.value.filter(
+    sg => sg.environment === selectedProject.value?.environment
+  )
+})
+
+const hasEnvironmentMismatch = computed(() => {
+  if (!selectedProject.value || form.server_group_ids.length === 0) {
+    return false
+  }
+  // 检查是否有选择的环境不匹配的服务器组
+  return form.server_group_ids.some(groupId => {
+    const group = serverGroups.value.find(sg => sg.id === groupId)
+    return group && group.environment !== selectedProject.value?.environment
+  })
+})
+
+function getEnvironmentLabel(env: Environment) {
+  return ENVIRONMENT_DISPLAY[env].label
+}
+
+function getEnvironmentColor(env: Environment) {
+  return ENVIRONMENT_DISPLAY[env].color
+}
+
+function getEnvironmentIcon(env: Environment) {
+  return ENVIRONMENT_DISPLAY[env].icon
+}
+
+function isEnvironmentMismatch(group: ServerGroup): boolean {
+  if (!selectedProject.value) return false
+  return group.environment !== selectedProject.value.environment
+}
+
 let eventSource: EventSource | null = null
 
 async function loadData() {
@@ -127,6 +222,9 @@ async function loadData() {
 
 async function handleProjectChange() {
   if (!form.project_id) return
+
+  // 清空服务器组选择，因为环境可能不匹配
+  form.server_group_ids = []
 
   loadingBranches.value = true
   try {
@@ -173,8 +271,8 @@ async function handleDeploy() {
     eventSource.onerror = () => {
       eventSource?.close()
     }
-  } catch (err) {
-    ElMessage.error('启动部署失败')
+  } catch (err: any) {
+    ElMessage.error(err?.response?.data?.detail || '启动部署失败')
     deploying.value = false
   }
 }
@@ -193,6 +291,23 @@ onUnmounted(() => {
 <style scoped>
 .deployment-console {
   padding: 20px;
+}
+
+.project-option,
+.server-group-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.form-tip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  font-size: 12px;
+  color: #606266;
 }
 
 .logs-container {

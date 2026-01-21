@@ -1,5 +1,6 @@
 """Database models."""
 from app.models.base import Base, TimestampMixin
+from app.models.audit_log import AuditAction, AuditLog
 from app.models.deployment import (
     Deployment,
     DeploymentArtifact,
@@ -32,4 +33,7 @@ __all__ = [
     "DeploymentArtifact",
     "DeploymentLog",
     "deployment_server_mappings",
+    # Audit
+    "AuditLog",
+    "AuditAction",
 ]

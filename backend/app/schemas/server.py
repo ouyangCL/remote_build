@@ -50,6 +50,7 @@ class ServerGroupBase(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=100)
     description: str | None = None
+    environment: str = Field(default="development", pattern="^(development|production)$")
 
 
 class ServerGroupCreate(ServerGroupBase):
@@ -63,6 +64,7 @@ class ServerGroupUpdate(BaseModel):
 
     name: str | None = Field(None, min_length=1, max_length=100)
     description: str | None = None
+    environment: str | None = Field(None, pattern="^(development|production)$")
     server_ids: list[int] | None = None
 
 

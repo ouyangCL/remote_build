@@ -1,4 +1,5 @@
 """Application configuration."""
+import secrets
 from typing import Literal
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -71,6 +72,87 @@ class Settings(BaseSettings):
 
     # Environment
     environment: Literal["development", "production"] = "development"
+
+    @field_validator("secret_key")
+    @classmethod
+    def validate_secret_key(cls, v: str, info) -> str:
+        """Validate that production environment uses a strong secret key.
+
+        Args:
+            v: The secret key value
+            info: Field validation info
+
+        Returns:
+            The validated secret key
+
+        Raises:
+            ValueError: If production environment uses weak secret key
+        """
+        if hasattr(info, "data") and info.data.get("environment") == "production":
+            weak_keys = [
+                "your-secret-key-change-in-production",
+                "your-secret-key",
+                "secret",
+                "dev-secret-key",
+                "CHANGE_ME",
+            ]
+            if v in weak_keys or len(v) < 32:
+                raise ValueError(
+                    "生产环境必须使用强密钥！请使用至少32个字符的随机字符串作为 SECRET_KEY。"
+                    "建议使用: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+                )
+        return v
+
+    @field_validator("encryption_key")
+    @classmethod
+    def validate_encryption_key(cls, v: str, info) -> str:
+        """Validate that production environment uses a strong encryption key.
+
+        Args:
+            v: The encryption key value
+            info: Field validation info
+
+        Returns:
+            The validated encryption key
+
+        Raises:
+            ValueError: If production environment uses weak encryption key
+        """
+        if hasattr(info, "data") and info.data.get("environment") == "production":
+            weak_keys = [
+                "your-encryption-key-change-in-production",
+                "your-encryption-key",
+                "encryption",
+                "dev-encryption-key",
+                "CHANGE_ME",
+            ]
+            if v in weak_keys or len(v) < 32:
+                raise ValueError(
+                    "生产环境必须使用强加密密钥！请使用至少32字节的随机字符串作为 ENCRYPTION_KEY。"
+                    "建议使用: python -c 'import secrets; print(secrets.token_urlsafe(32))'"
+                )
+        return v
+
+    @field_validator("database_url")
+    @classmethod
+    def validate_database_url(cls, v: str, info) -> str:
+        """Validate and warn about database choice for production.
+
+        Args:
+            v: The database URL
+            info: Field validation info
+
+        Returns:
+            The validated database URL
+        """
+        if hasattr(info, "data") and info.data.get("environment") == "production":
+            if v.startswith("sqlite:///"):
+                import warnings
+                warnings.warn(
+                    "生产环境推荐使用 PostgreSQL 而不是 SQLite。"
+                    "SQLite 在生产环境中可能存在性能和并发限制。"
+                )
+        return v
 
 
 settings = Settings()

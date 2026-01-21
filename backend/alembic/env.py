@@ -11,6 +11,7 @@ from app.config import settings
 from app.models.base import Base
 
 # Import all models to ensure they're registered
+from app.models.audit_log import AuditLog
 from app.models.deployment import (
     Deployment,
     DeploymentArtifact,
@@ -47,10 +48,10 @@ def run_migrations_offline() -> None:
     script output.
     """
     url = config.get_main_option("sqlalchemy.url")
+
     context.configure(
         url=url,
         target_metadata=target_metadata,
-        literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
 
@@ -90,9 +91,15 @@ def run_migrations_online() -> None:
     In this scenario we need to create an Engine
     and associate a connection with the context.
     """
-    # For SQLite, use synchronous mode
+    # For SQLite, use synchronous mode with direct connection
     if settings.database_url.startswith("sqlite"):
-        run_migrations_offline()
+        from sqlalchemy import create_engine
+
+        engine = create_engine(settings.database_url)
+        with engine.connect() as connection:
+            context.configure(connection=connection, target_metadata=target_metadata)
+            with context.begin_transaction():
+                context.run_migrations()
     else:
         asyncio.run(run_async_migrations())
 

@@ -14,6 +14,7 @@ class ProjectBase(BaseModel):
     build_script: str = Field(..., min_length=1)
     deploy_script_path: str = Field(default="/opt/restart.sh", max_length=255)
     output_dir: str = Field(default="dist", max_length=255)
+    environment: str = Field(default="development", pattern="^(development|production)$")
 
 
 class ProjectCreate(ProjectBase):
@@ -32,6 +33,7 @@ class ProjectUpdate(BaseModel):
     build_script: str | None = None
     deploy_script_path: str | None = Field(None, max_length=255)
     output_dir: str | None = Field(None, max_length=255)
+    environment: str | None = Field(None, pattern="^(development|production)$")
 
 
 class ProjectResponse(ProjectBase):

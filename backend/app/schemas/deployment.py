@@ -25,6 +25,7 @@ class DeploymentResponse(BaseModel):
     created_at: datetime
     created_by: int | None = None
     rollback_from: int | None = None
+    environment: str = "development"
 
     model_config = {"from_attributes": True}
 

@@ -1,7 +1,7 @@
 """Authentication API routes."""
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -14,6 +14,7 @@ from app.db.session import get_db
 from app.dependencies import get_current_user, get_current_admin
 from app.models.user import User, UserRole
 from app.schemas.auth import LoginRequest, TokenResponse, UserResponse
+from app.services.audit_service import log_login, log_logout
 
 router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 
@@ -21,12 +22,14 @@ router = APIRouter(prefix="/api/auth", tags=["Authentication"])
 @router.post("/login", response_model=TokenResponse)
 async def login(
     credentials: LoginRequest,
+    request: Request,
     db: Session = Depends(get_db),
 ) -> TokenResponse:
     """User login endpoint.
 
     Args:
         credentials: Login credentials
+        request: FastAPI request
         db: Database session
 
     Returns:
@@ -55,6 +58,11 @@ async def login(
         expires_delta=timedelta(minutes=settings.access_token_expire_minutes),
     )
 
+    # Log login
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log_login(db=db, user_id=user.id, ip_address=ip_address, user_agent=user_agent)
+
     return TokenResponse(access_token=access_token)
 
 
@@ -71,6 +79,30 @@ async def get_me(
         Current user data
     """
     return current_user
+
+
+@router.post("/logout")
+async def logout(
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> dict[str, str]:
+    """User logout endpoint.
+
+    Args:
+        request: FastAPI request
+        current_user: Current authenticated user
+        db: Database session
+
+    Returns:
+        Success message
+    """
+    # Log logout
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    log_logout(db=db, user_id=current_user.id, ip_address=ip_address, user_agent=user_agent)
+
+    return {"message": "Successfully logged out"}
 
 
 @router.post("/init", response_model=UserResponse)

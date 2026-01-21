@@ -1,9 +1,10 @@
 """Server management API routes."""
 from typing import cast
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
+from app.models.audit_log import AuditAction
 from app.core.security import encrypt_data
 from app.core.ssh import SSHConnectionError, create_ssh_connection, test_ssh_connection
 from app.db.session import get_db
@@ -19,6 +20,7 @@ from app.schemas.server import (
     ServerResponse,
     ServerUpdate,
 )
+from app.services.audit_service import create_audit_log
 
 router = APIRouter(prefix="/api/servers", tags=["Servers"])
 groups_router = APIRouter(prefix="/api/server-groups", tags=["Server Groups"])
@@ -37,6 +39,7 @@ async def list_servers(
 @router.post("", response_model=ServerResponse, status_code=status.HTTP_201_CREATED)
 async def create_server(
     server_data: ServerCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin),
 ) -> Server:
@@ -57,6 +60,20 @@ async def create_server(
     db.add(server)
     db.commit()
     db.refresh(server)
+
+    # Log audit
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    create_audit_log(
+        db=db,
+        user_id=current_admin.id,
+        action=AuditAction.SERVER_CREATE,
+        resource_type="server",
+        resource_id=server.id,
+        details={"server_name": server.name},
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
 
     return cast(Server, server)
 
@@ -82,6 +99,7 @@ async def get_server(
 async def update_server(
     server_id: int,
     server_data: ServerUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin),
 ) -> Server:
@@ -101,12 +119,27 @@ async def update_server(
     db.commit()
     db.refresh(server)
 
+    # Log audit
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    create_audit_log(
+        db=db,
+        user_id=current_admin.id,
+        action=AuditAction.SERVER_UPDATE,
+        resource_type="server",
+        resource_id=server.id,
+        details={"server_name": server.name},
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
     return cast(Server, server)
 
 
 @router.delete("/{server_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_server(
     server_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin),
 ) -> None:
@@ -118,8 +151,23 @@ async def delete_server(
             detail="Server not found",
         )
 
+    server_name = server.name
     db.delete(server)
     db.commit()
+
+    # Log audit
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    create_audit_log(
+        db=db,
+        user_id=current_admin.id,
+        action=AuditAction.SERVER_DELETE,
+        resource_type="server",
+        resource_id=server_id,
+        details={"server_name": server_name},
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
 
 
 @router.post("/{server_id}/test-connection", response_model=ConnectionTestResponse)
@@ -148,17 +196,24 @@ async def test_server_connection(
 
 @groups_router.get("", response_model=list[ServerGroupResponse])
 async def list_server_groups(
+    environment: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> list[ServerGroup]:
-    """List all server groups."""
-    groups = db.query(ServerGroup).order_by(ServerGroup.created_at.desc()).all()
+    """List all server groups, optionally filtered by environment."""
+    query = db.query(ServerGroup)
+
+    if environment:
+        query = query.filter(ServerGroup.environment == environment)
+
+    groups = query.order_by(ServerGroup.created_at.desc()).all()
     return cast(list[ServerGroup], groups)
 
 
 @groups_router.post("", response_model=ServerGroupResponse, status_code=status.HTTP_201_CREATED)
 async def create_server_group(
     group_data: ServerGroupCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin),
 ) -> ServerGroup:
@@ -173,6 +228,7 @@ async def create_server_group(
     group = ServerGroup(
         name=group_data.name,
         description=group_data.description,
+        environment=group_data.environment,
     )
     db.add(group)
     db.commit()
@@ -185,6 +241,20 @@ async def create_server_group(
 
     db.commit()
     db.refresh(group)
+
+    # Log audit
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    create_audit_log(
+        db=db,
+        user_id=current_admin.id,
+        action=AuditAction.SERVER_GROUP_CREATE,
+        resource_type="server_group",
+        resource_id=group.id,
+        details={"group_name": group.name, "environment": group.environment},
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
 
     return cast(ServerGroup, group)
 
@@ -210,6 +280,7 @@ async def get_server_group(
 async def update_server_group(
     group_id: int,
     group_data: ServerGroupUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin),
 ) -> ServerGroup:
@@ -225,6 +296,8 @@ async def update_server_group(
         group.name = group_data.name
     if group_data.description is not None:
         group.description = group_data.description
+    if group_data.environment is not None:
+        group.environment = group_data.environment
 
     if group_data.server_ids is not None:
         group.servers.clear()
@@ -236,12 +309,27 @@ async def update_server_group(
     db.commit()
     db.refresh(group)
 
+    # Log audit
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    create_audit_log(
+        db=db,
+        user_id=current_admin.id,
+        action=AuditAction.SERVER_GROUP_UPDATE,
+        resource_type="server_group",
+        resource_id=group.id,
+        details={"group_name": group.name, "environment": group.environment},
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
     return cast(ServerGroup, group)
 
 
 @groups_router.delete("/{group_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_server_group(
     group_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin),
 ) -> None:
@@ -253,5 +341,20 @@ async def delete_server_group(
             detail="Server group not found",
         )
 
+    group_name = group.name
     db.delete(group)
     db.commit()
+
+    # Log audit
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    create_audit_log(
+        db=db,
+        user_id=current_admin.id,
+        action=AuditAction.SERVER_GROUP_DELETE,
+        resource_type="server_group",
+        resource_id=group_id,
+        details={"group_name": group_name},
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )

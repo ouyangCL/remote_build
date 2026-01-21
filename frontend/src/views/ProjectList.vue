@@ -15,6 +15,13 @@
         <el-table-column prop="name" label="项目名称" />
         <el-table-column prop="git_url" label="Git地址" show-overflow-tooltip />
         <el-table-column prop="project_type" label="类型" width="100" />
+        <el-table-column label="环境" width="120">
+          <template #default="{ row }">
+            <el-tag :type="getEnvironmentColor(row.environment)" :icon="getEnvironmentIcon(row.environment)">
+              {{ getEnvironmentLabel(row.environment) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="操作" width="150" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="handleEdit(row)" :icon="Edit" />
@@ -55,6 +62,19 @@
           </el-select>
         </el-form-item>
 
+        <el-form-item label="环境" prop="environment">
+          <el-select v-model="form.environment" style="width: 100%">
+            <el-option label="开发/测试" value="development" />
+            <el-option label="生产" value="production" />
+          </el-select>
+          <div class="form-tip">
+            <el-icon v-if="form.environment === 'production'" color="#f56c6c"><Warning /></el-icon>
+            <span v-if="form.environment === 'production'" class="warning-text">
+              生产环境项目将只能部署到生产环境服务器组
+            </span>
+          </div>
+        </el-form-item>
+
         <el-form-item label="构建脚本" prop="build_script">
           <el-input
             v-model="form.build_script"
@@ -85,9 +105,10 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Warning } from '@element-plus/icons-vue'
 import { projects as projectsApi } from '@/api'
-import type { Project } from '@/types'
+import { ENVIRONMENT_DISPLAY } from '@/types'
+import type { Project, Environment } from '@/types'
 
 const projects = ref<Project[]>([])
 const loading = ref(false)
@@ -102,6 +123,7 @@ const form = reactive({
   description: '',
   git_url: '',
   project_type: 'frontend',
+  environment: 'development' as Environment,
   build_script: '',
   output_dir: 'dist',
   deploy_script_path: '/opt/restart.sh',
@@ -111,7 +133,20 @@ const rules = {
   name: [{ required: true, message: '必填', trigger: 'blur' }],
   git_url: [{ required: true, message: '必填', trigger: 'blur' }],
   project_type: [{ required: true, message: '必填', trigger: 'change' }],
+  environment: [{ required: true, message: '必填', trigger: 'change' }],
   build_script: [{ required: true, message: '必填', trigger: 'blur' }],
+}
+
+function getEnvironmentLabel(env: Environment) {
+  return ENVIRONMENT_DISPLAY[env].label
+}
+
+function getEnvironmentColor(env: Environment) {
+  return ENVIRONMENT_DISPLAY[env].color
+}
+
+function getEnvironmentIcon(env: Environment) {
+  return ENVIRONMENT_DISPLAY[env].icon
 }
 
 async function loadData() {
@@ -130,6 +165,7 @@ function handleCreate() {
     description: '',
     git_url: '',
     project_type: 'frontend',
+    environment: 'development' as Environment,
     build_script: '',
     output_dir: 'dist',
     deploy_script_path: '/opt/restart.sh',
@@ -192,5 +228,17 @@ onMounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
+}
+
+.form-tip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  font-size: 12px;
+}
+
+.warning-text {
+  color: #f56c6c;
 }
 </style>

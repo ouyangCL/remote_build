@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api import deployments, projects, servers
+from app.api import deployments, projects, servers, users
 from app.api.auth import router as auth_router
 from app.config import settings
 from app.db.session import ensure_directories, init_db
@@ -52,6 +52,8 @@ app.include_router(projects.router)
 app.include_router(servers.router)
 app.include_router(servers.groups_router)
 app.include_router(deployments.router)
+app.include_router(users.router)
+app.include_router(users.audit_router)
 
 
 @app.get("/")

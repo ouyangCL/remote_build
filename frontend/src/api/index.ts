@@ -5,6 +5,7 @@ import auth from './auth'
 import projects from './projects'
 import servers from './servers'
 import deployments from './deployments'
+import users from './users'
 
 const baseURL = import.meta.env.VITE_API_URL || '/api'
 
@@ -49,4 +50,4 @@ api.interceptors.response.use(
 )
 
 export default api
-export { auth, projects, servers, deployments }
+export { auth, projects, servers, deployments, users }

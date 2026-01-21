@@ -14,6 +14,13 @@
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="description" label="描述" show-overflow-tooltip />
+        <el-table-column label="环境" width="120">
+          <template #default="{ row }">
+            <el-tag :type="getEnvironmentColor(row.environment)" :icon="getEnvironmentIcon(row.environment)">
+              {{ getEnvironmentLabel(row.environment) }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="服务器" width="200">
           <template #default="{ row }">
             <el-tag
@@ -58,6 +65,19 @@
           <el-input v-model="form.description" type="textarea" />
         </el-form-item>
 
+        <el-form-item label="环境" prop="environment">
+          <el-select v-model="form.environment" style="width: 100%">
+            <el-option label="开发/测试" value="development" />
+            <el-option label="生产" value="production" />
+          </el-select>
+          <div class="form-tip">
+            <el-icon v-if="form.environment === 'production'" color="#f56c6c"><Warning /></el-icon>
+            <span v-if="form.environment === 'production'" class="warning-text">
+              生产环境服务器组只能部署生产环境项目
+            </span>
+          </div>
+        </el-form-item>
+
         <el-form-item label="服务器" prop="server_ids">
           <el-select
             v-model="form.server_ids"
@@ -88,9 +108,10 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Warning } from '@element-plus/icons-vue'
 import { servers as serversApi } from '@/api'
-import type { ServerGroup, Server } from '@/types'
+import { ENVIRONMENT_DISPLAY } from '@/types'
+import type { ServerGroup, Server, Environment } from '@/types'
 
 const serverGroups = ref<ServerGroup[]>([])
 const allServers = ref<Server[]>([])
@@ -104,11 +125,25 @@ const currentGroup = ref<ServerGroup | null>(null)
 const form = reactive({
   name: '',
   description: '',
+  environment: 'development' as Environment,
   server_ids: [] as number[],
 })
 
 const rules = {
   name: [{ required: true, message: '必填', trigger: 'blur' }],
+  environment: [{ required: true, message: '必填', trigger: 'change' }],
+}
+
+function getEnvironmentLabel(env: Environment) {
+  return ENVIRONMENT_DISPLAY[env].label
+}
+
+function getEnvironmentColor(env: Environment) {
+  return ENVIRONMENT_DISPLAY[env].color
+}
+
+function getEnvironmentIcon(env: Environment) {
+  return ENVIRONMENT_DISPLAY[env].icon
 }
 
 async function loadData() {
@@ -126,6 +161,7 @@ function handleCreate() {
   Object.assign(form, {
     name: '',
     description: '',
+    environment: 'development' as Environment,
     server_ids: [],
   })
   dialogVisible.value = true
@@ -137,6 +173,7 @@ function handleEdit(group: ServerGroup) {
   Object.assign(form, {
     name: group.name,
     description: group.description || '',
+    environment: group.environment,
     server_ids: group.servers?.map(s => s.id) || [],
   })
   dialogVisible.value = true
@@ -195,5 +232,17 @@ onMounted(() => {
 .text-gray {
   color: #909399;
   font-size: 12px;
+}
+
+.form-tip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  font-size: 12px;
+}
+
+.warning-text {
+  color: #f56c6c;
 }
 </style>
