@@ -18,10 +18,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Create directories
-RUN mkdir -p work artifacts logs
+RUN mkdir -p work artifacts logs data
 
 # Expose port
-EXPOSE 8000
+EXPOSE 9090
 
 # Run the application
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "9090"]

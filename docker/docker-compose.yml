@@ -10,7 +10,7 @@ services:
     ports:
       - "9090:9090"
     environment:
-      - DATABASE_URL=postgresql://devops:devops123@db:5432/devops
+      - DATABASE_URL=sqlite:///./data/devops.db
       - SECRET_KEY=change-this-in-production-use-a-long-random-string
       - ENCRYPTION_KEY=change-this-in-production-32-bytes-minimum
       - CORS_ORIGINS=http://localhost:5050
@@ -18,8 +18,7 @@ services:
       - ./work:/app/work
       - ./artifacts:/app/artifacts
       - ./logs:/app/logs
-    depends_on:
-      - db
+      - ./data:/app/data
     networks:
       - devops-network
 
@@ -35,22 +34,6 @@ services:
       - backend
     networks:
       - devops-network
-
-  db:
-    image: postgres:15-alpine
-    container_name: devops-db
-    restart: unless-stopped
-    environment:
-      - POSTGRES_DB=devops
-      - POSTGRES_USER=devops
-      - POSTGRES_PASSWORD=devops123
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    networks:
-      - devops-network
-
-volumes:
-  postgres_data:
 
 networks:
   devops-network:
