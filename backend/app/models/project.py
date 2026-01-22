@@ -29,6 +29,7 @@ class Project(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     git_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    git_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     git_ssh_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     project_type: Mapped[ProjectType] = mapped_column(String(20), nullable=False)
     build_script: Mapped[str] = mapped_column(Text, nullable=False)

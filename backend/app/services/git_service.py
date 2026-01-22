@@ -36,37 +36,122 @@ class GitError(Exception):
 
 
 class GitService:
-    """Service for Git operations with SSH key authentication."""
+    """Service for Git operations with SSH key or Token authentication."""
 
     def __init__(
         self,
         git_url: str,
         ssh_key: str | None = None,
+        git_token: str | None = None,
     ) -> None:
         """Initialize Git service.
 
         Args:
-            git_url: Git repository URL (SSH format: git@github.com:user/repo.git)
-            ssh_key: Optional SSH private key for private repositories
+            git_url: Git repository URL (SSH: git@github.com:user/repo.git or HTTPS: https://github.com/user/repo.git)
+            ssh_key: Optional SSH private key for SSH private repositories
+            git_token: Optional access token for HTTPS private repositories
         """
-        self.git_url = git_url
+        self.original_git_url = git_url
         self.ssh_key = ssh_key
+        self.git_token = git_token
         self.repo: Repo | None = None
         self.repo_path: Path | None = None
         self._ssh_key_file: Path | None = None
+        self._credential_file: Path | None = None
+        self._askpass_file: Path | None = None
 
-    def _setup_ssh_key(self) -> dict:
-        """Setup SSH key for Git operations.
+        # For HTTPS with token, don't embed in URL - use credential helper instead
+        self.git_url = git_url
+
+    def _is_ssh_url(self) -> bool:
+        """Check if the URL is an SSH URL.
+
+        Returns:
+            True if URL uses SSH protocol
+        """
+        return (
+            self.original_git_url.startswith('git@') or
+            self.original_git_url.startswith('ssh://') or
+            (':' in self.original_git_url and not self.original_git_url.startswith('http'))
+        )
+
+    def _setup_auth(self) -> dict:
+        """Setup authentication for Git operations (SSH key or Token).
 
         Returns:
             Environment variables dict for Git operations
         """
-        if not self.ssh_key:
-            # Disable SSH strict host key checking for public repos
-            return {
-                'GIT_SSL_NO_VERIFY': '1',
-                'GIT_SSH_COMMAND': 'ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
-            }
+        env = {'GIT_SSL_NO_VERIFY': '1'}
+
+        # For HTTPS with token, setup credential helper
+        if self.git_token and not self._is_ssh_url():
+            return self._setup_token_credential(env)
+
+        # For SSH URLs, setup SSH key
+        if self._is_ssh_url():
+            return self._setup_ssh_key(env)
+
+        return env
+
+    def _setup_token_credential(self, env: dict) -> dict:
+        """Setup Git credential helper for token authentication.
+
+        Args:
+            env: Base environment variables
+
+        Returns:
+            Environment variables with credential helper configured
+        """
+        from urllib.parse import urlparse
+
+        parsed = urlparse(self.git_url)
+        credential_dir = Path(tempfile.gettempdir()) / "devops_git_credentials"
+        credential_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a unique credential helper script
+        self._credential_file = credential_dir / f"cred_helper_{id(self)}"
+
+        # Write git credential helper script (not GIT_ASKPASS)
+        script_content = f'''#!/bin/bash
+# Git credential helper for token authentication
+if [ "$1" = "get" ]; then
+    echo "protocol={parsed.scheme}"
+    echo "host={parsed.netloc}"
+    echo "path={parsed.path}"
+    echo "username={self.git_token}"
+    echo "password="
+    echo ""
+elif [ "$1" = "store" ] || [ "$1" = "erase" ]; then
+    # Do nothing - we don't store credentials
+    echo ""
+fi
+'''
+        self._credential_file.write_text(script_content)
+        self._credential_file.chmod(0o700)
+
+        # Use GIT_ASKPASS with a simpler script that outputs credentials
+        askpass_file = credential_dir / f"askpass_{id(self)}"
+        askpass_content = f'''#!/bin/bash
+echo "{self.git_token}"
+'''
+        askpass_file.write_text(askpass_content)
+        askpass_file.chmod(0o700)
+        self._askpass_file = askpass_file
+
+        env['GIT_ASKPASS'] = str(askpass_file)
+        env['GIT_TERMINAL_PROMPT'] = '0'
+
+        return env
+
+    def _setup_ssh_key(self, env: dict) -> dict:
+        """Setup SSH key for Git operations.
+
+        Args:
+            env: Base environment variables
+
+        Returns:
+            Environment variables with SSH configuration
+        """
 
         # Create temporary SSH key file
         ssh_key_dir = Path(tempfile.gettempdir()) / "devops_ssh_keys"
@@ -93,6 +178,22 @@ class GitService:
                 pass
             self._ssh_key_file = None
 
+    def _cleanup_credential_file(self) -> None:
+        """Clean up temporary credential file."""
+        if self._credential_file and self._credential_file.exists():
+            try:
+                self._credential_file.unlink()
+            except Exception:
+                pass
+            self._credential_file = None
+
+        if self._askpass_file and self._askpass_file.exists():
+            try:
+                self._askpass_file.unlink()
+            except Exception:
+                pass
+            self._askpass_file = None
+
     def clone(self, target_dir: Path | None = None) -> Path:
         """Clone a Git repository.
 
@@ -116,8 +217,8 @@ class GitService:
             shutil.rmtree(target_dir, ignore_errors=True)
 
         try:
-            # Setup SSH key
-            env = self._setup_ssh_key()
+            # Setup authentication
+            env = self._setup_auth()
 
             # Clone repository
             import git
@@ -151,6 +252,8 @@ class GitService:
 
             raise GitError(error_msg) from e
         finally:
+            # Clean up credential file after clone
+            self._cleanup_credential_file()
             # Clean up SSH key file after clone
             self._cleanup_ssh_key()
 
@@ -167,10 +270,10 @@ class GitService:
             raise GitError("Repository not initialized. Call clone() first.")
 
         try:
-            # Setup SSH key for remote operations
-            env = self._setup_ssh_key()
+            # Setup authentication for remote operations
+            env = self._setup_auth()
 
-            # Fetch all remote branches with SSH key
+            # Fetch all remote branches
             self.repo.git.fetch(env=env)
 
             # Try to find the remote branch
@@ -198,6 +301,8 @@ class GitService:
         except GitCommandError as e:
             raise GitError(f"Failed to checkout branch '{branch_name}': {e}") from e
         finally:
+            # Clean up credential file
+            self._cleanup_credential_file()
             # Clean up SSH key file
             self._cleanup_ssh_key()
 
@@ -211,12 +316,14 @@ class GitService:
             raise GitError("Repository not initialized. Call clone() first.")
 
         try:
-            # Setup SSH key for remote operations
-            env = self._setup_ssh_key()
+            # Setup authentication for remote operations
+            env = self._setup_auth()
             self.repo.remotes.origin.pull(env=env)
         except GitCommandError as e:
             raise GitError(f"Failed to pull latest changes: {e}") from e
         finally:
+            # Clean up credential file
+            self._cleanup_credential_file()
             # Clean up SSH key file
             self._cleanup_ssh_key()
 
@@ -258,8 +365,8 @@ class GitService:
             raise GitError("Repository not initialized. Call clone() first.")
 
         try:
-            # Setup SSH key for remote operations
-            env = self._setup_ssh_key()
+            # Setup authentication for remote operations
+            env = self._setup_auth()
 
             # Fetch all remote branches
             self.repo.remotes.origin.fetch(env=env)
@@ -281,16 +388,20 @@ class GitService:
         except GitCommandError as e:
             raise GitError(f"Failed to get branches: {e}") from e
         finally:
+            # Clean up credential file
+            self._cleanup_credential_file()
             # Clean up SSH key file
             self._cleanup_ssh_key()
 
     def cleanup(self) -> None:
-        """Clean up the cloned repository and SSH key."""
+        """Clean up the cloned repository and credentials."""
         if self.repo_path and self.repo_path.exists():
             shutil.rmtree(self.repo_path, ignore_errors=True)
             self.repo_path = None
             self.repo = None
 
+        # Clean up credential file
+        self._cleanup_credential_file()
         # Clean up SSH key file
         self._cleanup_ssh_key()
 
@@ -308,18 +419,20 @@ def git_context(
     git_url: str,
     branch: str,
     ssh_key: str | None = None,
+    git_token: str | None = None,
 ) -> Generator[GitService, None, None]:
     """Context manager for Git operations.
 
     Args:
-        git_url: Git repository URL (SSH format: git@github.com:user/repo.git)
+        git_url: Git repository URL (SSH or HTTPS format)
         branch: Branch to checkout
-        ssh_key: Optional SSH private key for private repositories
+        ssh_key: Optional SSH private key for SSH private repositories
+        git_token: Optional access token for HTTPS private repositories
 
     Yields:
         Git service instance
     """
-    service = GitService(git_url, ssh_key)
+    service = GitService(git_url, ssh_key=ssh_key, git_token=git_token)
     try:
         service.clone()
         service.checkout_branch(branch)
@@ -331,12 +444,14 @@ def git_context(
 def get_remote_branches(
     git_url: str,
     ssh_key: str | None = None,
+    git_token: str | None = None,
 ) -> list[str]:
     """Get list of remote branches without cloning.
 
     Args:
-        git_url: Git repository URL (SSH format: git@github.com:user/repo.git)
-        ssh_key: Optional SSH private key for private repositories
+        git_url: Git repository URL (SSH or HTTPS format)
+        ssh_key: Optional SSH private key for SSH private repositories
+        git_token: Optional access token for HTTPS private repositories
 
     Returns:
         List of branch names
@@ -344,7 +459,7 @@ def get_remote_branches(
     Raises:
         GitError: If failed to get branches
     """
-    service = GitService(git_url, ssh_key)
+    service = GitService(git_url, ssh_key=ssh_key, git_token=git_token)
     try:
         service.clone()
         return service.get_branches()

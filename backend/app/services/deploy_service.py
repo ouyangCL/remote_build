@@ -94,6 +94,7 @@ class DeploymentService:
             with git_context(
                 self.deployment.project.git_url,
                 self.deployment.branch,
+                git_token=self.deployment.project.git_token,
                 ssh_key=self.deployment.project.git_ssh_key,
             ) as git_service:
                 git_info = git_service.get_info()
@@ -123,6 +124,7 @@ class DeploymentService:
         # Clone repo for building
         git_service = GitService(
             self.deployment.project.git_url,
+            git_token=self.deployment.project.git_token,
             ssh_key=self.deployment.project.git_ssh_key,
         )
         try:
