@@ -2,7 +2,7 @@
 import enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import String, Text, Index
+from sqlalchemy import String, Text, Index, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -49,7 +49,7 @@ class AuditLog(Base, TimestampMixin):
     __tablename__ = "audit_logs"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False, index=True)
     action: Mapped[AuditAction] = mapped_column(String(50), nullable=False, index=True)
     resource_type: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     resource_id: Mapped[int | None] = mapped_column(nullable=True, index=True)

@@ -310,9 +310,13 @@ async def get_audit_logs(
         details_dict = None
         if log.details:
             try:
-                details_dict = json.loads(log.details)
+                # details might already be a dict (SQLAlchemy auto-parsed) or a string
+                if isinstance(log.details, dict):
+                    details_dict = log.details
+                else:
+                    details_dict = json.loads(log.details)
             except Exception:
-                pass
+                details_dict = log.details
 
         items.append(
             AuditLogResponseWithUser(

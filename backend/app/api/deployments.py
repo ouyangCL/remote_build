@@ -7,13 +7,13 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditAction
-from app.core.permissions import require_operator
+from app.core.permissions import Permission
 from app.db.session import get_db
 from app.dependencies import get_current_user
 from app.models.deployment import Deployment, DeploymentStatus
 from app.models.project import Project
 from app.models.server import ServerGroup
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.schemas.deployment import (
     DeploymentCreate,
     DeploymentResponse,
@@ -25,6 +25,18 @@ from app.services.log_service import stream_deployment_logs
 from app.services.rollback_service import execute_rollback
 
 router = APIRouter(prefix="/api/deployments", tags=["Deployments"])
+
+
+def get_current_operator(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    """Get current user and verify they are an operator or admin."""
+    if current_user.role not in {UserRole.ADMIN, UserRole.OPERATOR}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Deploy permission required (admin or operator role)",
+        )
+    return current_user
 
 
 @router.get("", response_model=list[DeploymentResponse])
@@ -52,7 +64,7 @@ async def create_deployment(
     deployment_data: DeploymentCreate,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_operator),
 ) -> Deployment:
     """Create a new deployment."""
     # Validate project
@@ -186,7 +198,7 @@ async def rollback_deployment(
     rollback_data: dict,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_operator),
 ) -> Deployment:
     """Rollback to a previous deployment."""
     # Get source deployment
@@ -268,7 +280,7 @@ async def cancel_deployment(
     deployment_id: int,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_operator),
 ) -> None:
     """Cancel an active deployment."""
     deployment = db.query(Deployment).filter(Deployment.id == deployment_id).first()

@@ -73,7 +73,7 @@ class AuditLogResponseWithUser(BaseModel):
     action: str
     resource_type: str | None = None
     resource_id: int | None = None
-    details: str | None = None
+    details: Any | None = None
     ip_address: str | None = None
     user_agent: str | None = None
     created_at: datetime

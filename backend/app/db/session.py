@@ -6,6 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import settings
+from app.models.base import Base
 
 
 # Create engine
@@ -37,6 +38,9 @@ def init_db() -> None:
     if settings.database_url.startswith("sqlite"):
         db_path = settings.database_url.replace("sqlite:///", "")
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+
+    # Create all tables
+    Base.metadata.create_all(bind=engine)
 
 
 def ensure_directories() -> None:
