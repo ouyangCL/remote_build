@@ -1,62 +1,108 @@
 # DevOps Deployment Platform
 
-An automated deployment platform supporting Git-based projects, build management, and one-click deployments to server groups.
+> 一个功能完整的 DevOps 自动化部署平台，支持 Git 项目自动化构建、打包和一键部署到服务器集群。
 
-## Features
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![Node](https://img.shields.io/badge/node-20+-green.svg)](https://nodejs.org)
 
-- **Multi-user Support**: Role-based access control (Admin, Operator, Viewer)
-- **Project Management**: Configure Git repositories, build scripts, and deployment settings
-- **Server Management**: SSH connection management with server groups
-- **One-Click Deployment**: Automated build and deploy pipeline
-- **Real-time Logs**: SSE-based streaming logs
-- **Version Rollback**: Quick rollback to previous deployments
-- **Secure**: Encrypted credentials, JWT authentication
+---
 
-## Tech Stack
+## 功能特性
 
-- **Backend**: FastAPI + SQLAlchemy + SQLite
-- **Frontend**: Vue 3 + Element Plus + TypeScript
-- **Deployment**: Systemd + Nginx (Production) / Native (Development)
+### 核心功能
 
-## Quick Start
+- **多用户系统**：基于角色的访问控制（管理员、操作员、查看者）
+- **项目管理**：支持配置 Git 仓库、构建脚本和部署参数
+- **服务器管理**：SSH 连接管理，支持服务器分组
+- **一键部署**：自动化构建和部署流水线
+- **实时日志**：基于 SSE 的流式日志，实时查看部署过程
+- **版本回滚**：快速回滚到之前的部署版本
+- **私有仓库支持**：通过 Git Token 认证访问私有 Git 仓库
+- **多种项目类型**：支持前端、后端、Java/Maven 等多种项目类型
 
-### Prerequisites
+### 安全特性
+
+- AES-256 加密存储 SSH 凭据
+- JWT Token 认证机制
+- 基于角色的权限控制（RBAC）
+- 完整的操作审计日志
+- 生产环境密钥强度验证
+
+---
+
+## 技术栈
+
+### 后端
+- **框架**：[FastAPI](https://fastapi.tiangolo.com/) - 现代高性能 Python Web 框架
+- **数据库**：SQLite (开发) / PostgreSQL (生产)
+- **ORM**：[SQLAlchemy 2.0](https://www.sqlalchemy.org/)
+- **认证**：JWT (python-jose) + Passlib
+- **SSH**：[Paramiko](https://www.paramiko.org/)
+- **Git**：[GitPython](https://gitpython.readthedocs.io/)
+- **日志**：[Loguru](https://github.com/Delgan/loguru)
+
+### 前端
+- **框架**：[Vue 3](https://vuejs.org/) (Composition API)
+- **UI 库**：[Element Plus](https://element-plus.org/)
+- **状态管理**：[Pinia](https://pinia.vuejs.org/)
+- **路由**：[Vue Router 4](https://router.vuejs.org/)
+- **构建工具**：[Vite](https://vitejs.dev/)
+- **类型系统**：TypeScript
+
+### 部署
+- **开发环境**：Uvicorn + Vite Dev Server
+- **生产环境**：Systemd + Nginx
+
+---
+
+## 快速开始
+
+### 环境要求
 
 - Python 3.11+
 - Node.js 20+
 - Git
 
-### Local Development
+### 本地开发
 
-一键启动开发模式：
+#### 方式一：一键启动（推荐）
 
 ```bash
 ./scripts/dev.sh
 ```
 
-或手动启动：
+#### 方式二：手动启动
+
+**后端服务：**
 
 ```bash
-# 后端
 cd backend
 pip install -r requirements.txt
 alembic upgrade head
 uvicorn app.main:app --host 0.0.0.0 --port 9090 --reload
+```
 
-# 前端（新终端）
+**前端服务（新终端）：**
+
+```bash
 cd frontend
 npm install
 npm run dev
 ```
 
-访问地址：
-- Frontend: http://localhost:5173
-- Backend API: http://localhost:9090
-- Default credentials: `admin` / `admin123`
+### 访问地址
 
-### Production Deployment
+- **前端界面**：http://localhost:5173
+- **后端 API**：http://localhost:9090
+- **API 文档**：http://localhost:9090/docs
+- **默认账号**：`admin` / `admin123`
 
-生产环境使用 systemd + nginx 部署：
+---
+
+## 生产部署
+
+使用 Systemd + Nginx 部署：
 
 ```bash
 # 1. 运行部署脚本（需要 root 权限）
@@ -69,7 +115,7 @@ sudo nano /opt/devops/backend/.env.production
 sudo ./scripts/deploy.sh
 ```
 
-服务管理命令：
+**服务管理：**
 
 ```bash
 # 启动/停止/重启服务
@@ -84,111 +130,186 @@ sudo systemctl status devops-backend
 sudo journalctl -u devops-backend -f
 ```
 
-## Configuration
+---
 
-### Backend Environment Variables
+## 配置说明
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `DATABASE_URL` | SQLite database path | `sqlite:///./data/devops.db` |
-| `SECRET_KEY` | JWT signing key | - |
-| `ENCRYPTION_KEY` | SSH credentials encryption key | - |
-| `CORS_ORIGINS` | Allowed CORS origins | `http://localhost:5173` |
-| `WORK_DIR` | Working directory for builds | `./work` |
-| `ARTIFACTS_DIR` | Deployment artifacts directory | `./artifacts` |
-| `LOGS_DIR` | Logs directory | `./logs` |
+### 后端环境变量
 
-### Production Setup
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `DATABASE_URL` | 数据库连接字符串 | `sqlite:///./data/devops.db` |
+| `SECRET_KEY` | JWT 签名密钥 | - |
+| `ENCRYPTION_KEY` | SSH 凭据加密密钥 | - |
+| `CORS_ORIGINS` | 允许的 CORS 源 | `http://localhost:5173` |
+| `WORK_DIR` | 构建工作目录 | `./work` |
+| `ARTIFACTS_DIR` | 部署包存档目录 | `./artifacts` |
+| `LOGS_DIR` | 日志目录 | `./logs` |
 
-生产环境部署目录：
+### 生产环境目录结构
 
 ```
 /opt/devops/
-├── backend/         # 后端代码
-│   ├── venv/        # Python 虚拟环境
-│   ├── data/        # SQLite 数据库
-│   ├── work/        # 构建工作区
-│   ├── artifacts/   # 部署包存档
-│   └── logs/        # 日志
+├── backend/
+│   ├── venv/           # Python 虚拟环境
+│   ├── data/           # SQLite 数据库
+│   ├── work/           # 构建工作区
+│   ├── artifacts/      # 部署包存档
+│   └── logs/           # 日志文件
 └── frontend/
-    └── dist/        # 前端构建产物
+    └── dist/           # 前端构建产物
 ```
 
-### Project Setup
+---
 
-1. **Create a Project**:
-   - Navigate to Projects page
-   - Click "New Project"
-   - Configure Git URL, build script, and deployment settings
+## 使用指南
 
-2. **Add Servers**:
-   - Navigate to Servers page
-   - Add servers with SSH credentials
-   - Test connection before saving
+### 1. 创建项目
 
-3. **Create Server Groups**:
-   - Navigate to Server Groups page
-   - Create groups and add servers
+1. 导航到「项目管理」页面
+2. 点击「新建项目」
+3. 配置 Git 仓库地址（支持私有仓库 Token 认证）
+4. 设置构建脚本和部署脚本
+5. 选择项目类型（前端/后端/Java）
 
-4. **Deploy**:
-   - Navigate to Deploy page
-   - Select project, branch, and server groups
-   - Click "Start Deployment"
-   - Monitor real-time logs
+### 2. 添加服务器
 
-## Project Structure
+1. 导航到「服务器管理」页面
+2. 添加服务器 SSH 连接信息
+3. 测试连接确保配置正确
+
+### 3. 创建服务器组
+
+1. 导航到「服务器组」页面
+2. 创建分组并添加服务器
+3. 可用于批量部署
+
+### 4. 执行部署
+
+1. 导航到「部署」页面
+2. 选择项目、分支和服务器组
+3. 点击「开始部署」
+4. 实时监控部署日志
+5. 部署完成后可进行回滚操作
+
+---
+
+## 部署流程
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  选择项目    │ --> │  克隆代码    │ --> │  执行构建    │
+│  分支/环境   │     │  Git仓库     │     │  自定义脚本  │
+└─────────────┘     └─────────────┘     └─────────────┘
+                                                │
+                                                v
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│  存储版本    │ <-- │  执行重启    │ <-- │  打包上传    │
+│  支持回滚    │     │  SSH远程命令  │     │  tar.gz传输  │
+└─────────────┘     └─────────────┘     └─────────────┘
+```
+
+---
+
+## 项目结构
 
 ```
 devops/
-├── backend/                 # FastAPI backend
+├── backend/                 # FastAPI 后端
 │   ├── app/
-│   │   ├── api/            # API routes
-│   │   ├── core/           # Security, SSH
-│   │   ├── models/         # Database models
-│   │   ├── schemas/        # Pydantic schemas
-│   │   ├── services/       # Business logic
-│   │   ├── db/             # Database session
-│   │   ├── config.py       # Configuration
-│   │   └── main.py         # Application entry
-│   ├── alembic/            # Database migrations
+│   │   ├── api/            # API 路由
+│   │   ├── core/           # 安全、SSH 核心
+│   │   ├── models/         # 数据库模型
+│   │   ├── schemas/        # Pydantic 模式
+│   │   ├── services/       # 业务逻辑
+│   │   ├── db/             # 数据库会话
+│   │   ├── config.py       # 配置管理
+│   │   └── main.py         # 应用入口
+│   ├── alembic/            # 数据库迁移
 │   └── requirements.txt
 │
-├── frontend/                # Vue 3 frontend
+├── frontend/                # Vue 3 前端
 │   ├── src/
-│   │   ├── api/            # API clients
-│   │   ├── views/          # Page components
-│   │   ├── stores/         # Pinia state
+│   │   ├── api/            # API 客户端
+│   │   ├── views/          # 页面组件
+│   │   ├── stores/         # Pinia 状态
 │   │   ├── router/         # Vue Router
-│   │   └── types/          # TypeScript types
+│   │   └── types/          # TypeScript 类型
 │   └── package.json
 │
 ├── scripts/                 # 部署脚本
 │   ├── dev.sh              # 本地开发启动
 │   └── deploy.sh           # 生产环境部署
 │
-└── deploy/                  # 生产环境配置
-    ├── devops-backend.service   # systemd 配置
-    └── devops-nginx.conf        # nginx 配置
+├── deploy/                  # 生产环境配置
+│   ├── devops-backend.service   # systemd 配置
+│   └── devops-nginx.conf        # nginx 配置
 ```
 
-## Deployment Flow
+---
 
-1. User selects project, branch, and server groups
-2. Backend clones the Git repository
-3. Executes custom build script
-4. Packages build output as tar.gz
-5. Uploads to all servers in the group via SSH
-6. Executes pre-configured restart script
-7. Stores artifact for rollback
+## 安全说明
 
-## Security
+- **SSH 凭据加密**：使用 AES-256 加密算法存储所有服务器密码和私钥
+- **JWT 认证**：所有 API 请求需要有效的 JWT Token
+- **权限控制**：
+  - **管理员**：完全访问权限
+  - **操作员**：部署和查看权限
+  - **查看者**：仅查看权限
+- **审计日志**：所有关键操作都会记录审计日志
+- **安全头**：生产环境配置了完整的安全 HTTP 头
 
-- SSH passwords/keys encrypted with AES-256
-- JWT token authentication
-- Role-based access control
-- Audit logging for all operations
-- Secure HTTP headers
+---
 
-## License
+## 数据库设计
 
-MIT
+| 表名 | 说明 |
+|------|------|
+| `users` | 用户表（支持三种角色） |
+| `projects` | 项目配置表 |
+| `servers` | 服务器信息表 |
+| `deployments` | 部署记录表 |
+| `audit_logs` | 审计日志表 |
+| `environments` | 环境配置表 |
+
+---
+
+## 更新日志
+
+### v1.0.0 (2024)
+
+- 初始版本发布
+- 支持基本的 Git 项目部署功能
+- 多用户和权限控制
+- 实时日志和版本回滚
+
+### v1.1.0
+
+- 添加 Java/Maven 项目类型支持
+- 添加 Git Token 认证支持私有仓库
+- 数据库从 PostgreSQL 迁移到 SQLite（开发环境）
+- 完善部署脚本和文档
+
+---
+
+## 贡献指南
+
+欢迎提交 Issue 和 Pull Request！
+
+1. Fork 本仓库
+2. 创建特性分支 (`git checkout -b feature/AmazingFeature`)
+3. 提交更改 (`git commit -m 'Add some AmazingFeature'`)
+4. 推送到分支 (`git push origin feature/AmazingFeature`)
+5. 开启 Pull Request
+
+---
+
+## 许可证
+
+本项目采用 [MIT](LICENSE) 许可证。
+
+---
+
+## 联系方式
+
+如有问题或建议，请提交 Issue 或 Pull Request。
