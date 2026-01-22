@@ -28,6 +28,7 @@ class Project(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     git_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    git_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
     project_type: Mapped[ProjectType] = mapped_column(String(20), nullable=False)
     build_script: Mapped[str] = mapped_column(Text, nullable=False)
     deploy_script_path: Mapped[str] = mapped_column(
@@ -47,3 +48,8 @@ class Project(Base, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<Project(id={self.id}, name='{self.name}', type='{self.project_type}')>"
+
+    @property
+    def has_git_token(self) -> bool:
+        """Check if project has a Git token configured."""
+        return bool(self.git_token)

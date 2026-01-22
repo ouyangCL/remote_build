@@ -92,7 +92,9 @@ class DeploymentService:
 
         try:
             with git_context(
-                self.deployment.project.git_url, self.deployment.branch
+                self.deployment.project.git_url,
+                self.deployment.branch,
+                token=self.deployment.project.git_token,
             ) as git_service:
                 git_info = git_service.get_info()
                 self.deployment.commit_hash = git_info.commit_hash
@@ -119,7 +121,10 @@ class DeploymentService:
         work_dir.mkdir(parents=True, exist_ok=True)
 
         # Clone repo for building
-        git_service = GitService(self.deployment.project.git_url)
+        git_service = GitService(
+            self.deployment.project.git_url,
+            token=self.deployment.project.git_token,
+        )
         try:
             git_service.clone(work_dir)
             git_service.checkout_branch(self.deployment.branch)

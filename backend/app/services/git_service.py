@@ -1,4 +1,5 @@
 """Git service for repository operations."""
+import re
 import shutil
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -33,15 +34,50 @@ class GitError(Exception):
 class GitService:
     """Service for Git operations."""
 
-    def __init__(self, git_url: str) -> None:
+    def __init__(self, git_url: str, token: str | None = None) -> None:
         """Initialize Git service.
 
         Args:
             git_url: Git repository URL
+            token: Optional Git access token for private repositories
         """
         self.git_url = git_url
+        self.token = token
         self.repo: Repo | None = None
         self.repo_path: Path | None = None
+
+    def _get_authenticated_url(self) -> str:
+        """Get authenticated URL with token if available.
+
+        Returns:
+            Authenticated Git URL
+        """
+        if not self.token:
+            return self.git_url
+
+        # If URL already contains token, return as is
+        if "://@" in self.git_url or "://oauth2:" in self.git_url:
+            return self.git_url
+
+        # Parse URL and insert token
+        # Support formats:
+        # - https://github.com/user/repo.git
+        # - git@github.com:user/repo.git (SSH, token doesn't apply)
+        # - https://user@github.com/user/repo.git
+
+        if self.git_url.startswith("https://"):
+            # Check if username already present
+            if "://" in self.git_url and "@" in self.git_url.split("://")[1]:
+                # Already has username, replace it
+                base_url = self.git_url.split("//")[0]
+                rest = self.git_url.split("//")[1]
+                if "/" in rest:
+                    _, repo_path = rest.split("/", 1)
+                    return f"{base_url}//oauth2:{self.token}@{repo_path}"
+            return self.git_url.replace("https://", f"https://oauth2:{self.token}@")
+
+        # For SSH URLs, token is not applicable
+        return self.git_url
 
     def clone(self, target_dir: Path | None = None) -> Path:
         """Clone a Git repository.
@@ -62,8 +98,9 @@ class GitService:
             target_dir = work_path / f"repo_{id(self)}"
 
         try:
+            url = self._get_authenticated_url()
             self.repo_path = Path(
-                Repo.clone_from(self.git_url, target_dir, depth=1).working_dir
+                Repo.clone_from(url, target_dir, depth=1).working_dir
             )
             self.repo = Repo(self.repo_path)
             return self.repo_path
@@ -83,6 +120,12 @@ class GitService:
             raise GitError("Repository not initialized. Call clone() first.")
 
         try:
+            # Fetch remote branches with authenticated URL
+            url = self._get_authenticated_url()
+            if url != self.git_url:
+                # Update remote URL if using token
+                self.repo.remotes.origin.set_url(url)
+
             # Fetch remote branches
             self.repo.remotes.origin.fetch()
 
@@ -105,6 +148,11 @@ class GitService:
             raise GitError("Repository not initialized. Call clone() first.")
 
         try:
+            # Update remote URL if using token
+            url = self._get_authenticated_url()
+            if url != self.git_url:
+                self.repo.remotes.origin.set_url(url)
+
             self.repo.remotes.origin.pull()
         except GitCommandError as e:
             raise GitError(f"Failed to pull latest changes: {e}") from e
@@ -184,17 +232,18 @@ class GitService:
 
 
 @contextmanager
-def git_context(git_url: str, branch: str) -> Generator[GitService, None, None]:
+def git_context(git_url: str, branch: str, token: str | None = None) -> Generator[GitService, None, None]:
     """Context manager for Git operations.
 
     Args:
         git_url: Git repository URL
         branch: Branch to checkout
+        token: Optional Git access token for private repositories
 
     Yields:
         Git service instance
     """
-    service = GitService(git_url)
+    service = GitService(git_url, token)
     try:
         service.clone()
         service.checkout_branch(branch)
@@ -203,11 +252,12 @@ def git_context(git_url: str, branch: str) -> Generator[GitService, None, None]:
         service.cleanup()
 
 
-def get_remote_branches(git_url: str) -> list[str]:
+def get_remote_branches(git_url: str, token: str | None = None) -> list[str]:
     """Get list of remote branches without cloning.
 
     Args:
         git_url: Git repository URL
+        token: Optional Git access token for private repositories
 
     Returns:
         List of branch names
@@ -215,7 +265,7 @@ def get_remote_branches(git_url: str) -> list[str]:
     Raises:
         GitError: If failed to get branches
     """
-    service = GitService(git_url)
+    service = GitService(git_url, token)
     try:
         service.clone()
         return service.get_branches()

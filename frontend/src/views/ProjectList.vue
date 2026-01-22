@@ -55,6 +55,19 @@
           <el-input v-model="form.git_url" placeholder="https://github.com/user/repo.git" />
         </el-form-item>
 
+        <el-form-item label="Git Token">
+          <el-input
+            v-model="form.git_token"
+            type="password"
+            placeholder="私有仓库需要，可选"
+            show-password
+          />
+          <div class="form-tip">
+            <el-icon color="#909399"><InfoFilled /></el-icon>
+            <span>用于访问私有 Git 仓库，公开仓库可留空</span>
+          </div>
+        </el-form-item>
+
         <el-form-item label="项目类型" prop="project_type">
           <el-select v-model="form.project_type" style="width: 100%">
             <el-option label="前端" value="frontend" />
@@ -105,7 +118,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Warning } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Warning, InfoFilled } from '@element-plus/icons-vue'
 import { projects as projectsApi } from '@/api'
 import { ENVIRONMENT_DISPLAY } from '@/types'
 import type { Project, Environment } from '@/types'
@@ -122,6 +135,7 @@ const form = reactive({
   name: '',
   description: '',
   git_url: '',
+  git_token: '',
   project_type: 'frontend',
   environment: 'development' as Environment,
   build_script: '',
@@ -164,6 +178,7 @@ function handleCreate() {
     name: '',
     description: '',
     git_url: '',
+    git_token: '',
     project_type: 'frontend',
     environment: 'development' as Environment,
     build_script: '',

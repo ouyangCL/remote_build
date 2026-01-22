@@ -20,7 +20,7 @@ class ProjectBase(BaseModel):
 class ProjectCreate(ProjectBase):
     """Project creation schema."""
 
-    pass
+    git_token: str | None = Field(None, max_length=255, description="Git access token for private repositories")
 
 
 class ProjectUpdate(BaseModel):
@@ -29,6 +29,7 @@ class ProjectUpdate(BaseModel):
     name: str | None = Field(None, min_length=1, max_length=100)
     description: str | None = None
     git_url: str | None = Field(None, min_length=1, max_length=500)
+    git_token: str | None = Field(None, max_length=255, description="Git access token for private repositories")
     project_type: str | None = Field(None, pattern="^(frontend|backend)$")
     build_script: str | None = None
     deploy_script_path: str | None = Field(None, max_length=255)
@@ -42,6 +43,7 @@ class ProjectResponse(ProjectBase):
     id: int
     created_at: datetime
     updated_at: datetime
+    has_git_token: bool = Field(default=False, description="Whether the project has a Git token configured")
 
     model_config = {"from_attributes": True}
 
