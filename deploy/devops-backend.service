@@ -1,0 +1,27 @@
+[Unit]
+Description=DevOps Platform Backend
+After=network.target
+
+[Service]
+Type=simple
+User=devops
+Group=devops
+WorkingDirectory=/opt/devops/backend
+Environment="PATH=/opt/devops/backend/venv/bin"
+Environment="ENVIRONMENT=production"
+EnvironmentFile=/opt/devops/backend/.env.production
+
+ExecStart=/opt/devops/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 9090
+Restart=always
+RestartSec=10
+
+# 日志
+StandardOutput=append:/opt/devops/logs/backend.log
+StandardError=append:/opt/devops/logs/backend.error.log
+
+# 安全
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
