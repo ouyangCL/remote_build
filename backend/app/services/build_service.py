@@ -2,7 +2,7 @@
 import hashlib
 import os
 import shutil
-import tarfile
+import zipfile
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -167,7 +167,7 @@ class BuildService:
             return 1
 
     def _create_artifact(self, source_path: Path) -> Path:
-        """Create a tar.gz artifact from source directory.
+        """Create a zip artifact from source directory.
 
         Args:
             source_path: Source directory to package
@@ -183,14 +183,18 @@ class BuildService:
         import time
 
         timestamp = int(time.time())
-        artifact_name = f"artifact_{timestamp}.tar.gz"
+        artifact_name = f"artifact_{timestamp}.zip"
         artifact_path = artifacts_dir / artifact_name
 
         self._log(f"Creating artifact: {artifact_path}")
 
-        # Create tar.gz archive
-        with tarfile.open(artifact_path, "w:gz") as tar:
-            tar.add(source_path, arcname="")
+        # Create zip archive
+        with zipfile.ZipFile(artifact_path, "w", zipfile.ZIP_DEFLATED) as zipf:
+            for root, dirs, files in os.walk(source_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    arcname = os.path.relpath(file_path, source_path)
+                    zipf.write(file_path, arcname)
 
         return artifact_path
 
@@ -237,7 +241,7 @@ def cleanup_artifacts(max_size_mb: int | None = None) -> None:
     artifacts = []
     total_size = 0
 
-    for artifact in artifacts_dir.glob("artifact_*.tar.gz"):
+    for artifact in artifacts_dir.glob("artifact_*.zip"):
         size = artifact.stat().st_size
         total_size += size
         artifacts.append((artifact.stat().st_mtime, artifact, size))

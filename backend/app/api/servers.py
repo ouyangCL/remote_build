@@ -9,7 +9,7 @@ from app.core.security import encrypt_data
 from app.core.ssh import SSHConnectionError, create_ssh_connection, test_ssh_connection
 from app.db.session import get_db
 from app.dependencies import get_current_user, get_current_admin
-from app.models.server import AuthType, Server, ServerGroup
+from app.models.server import AuthType, ConnectionStatus, Server, ServerGroup
 from app.models.user import User
 from app.schemas.server import (
     ConnectionTestResponse,
@@ -112,9 +112,14 @@ async def update_server(
         )
 
     for field, value in server_data.model_dump(exclude_unset=True).items():
-        if field == "auth_value" and value is not None:
-            value = encrypt_data(value)
-        setattr(server, field, value)
+        if field == "auth_value":
+            # Only update auth_value if a new value is provided (not empty string)
+            if value is not None and value != "":
+                value = encrypt_data(value)
+                setattr(server, field, value)
+            # If value is None or empty string, keep the existing auth_value
+        else:
+            setattr(server, field, value)
 
     db.commit()
     db.refresh(server)
@@ -176,7 +181,7 @@ async def test_server_connection(
     db: Session = Depends(get_db),
     current_admin: User = Depends(get_current_admin),
 ) -> ConnectionTestResponse:
-    """Test SSH connection to a server."""
+    """Test SSH connection to a server and update connection status."""
     server = db.query(Server).filter(Server.id == server_id).first()
     if not server:
         raise HTTPException(
@@ -187,10 +192,19 @@ async def test_server_connection(
     try:
         success = test_ssh_connection(server)
         if success:
-            return ConnectionTestResponse(success=True, message="Connection successful")
+            # Update connection status to online
+            server.connection_status = ConnectionStatus.ONLINE
+            db.commit()
+            return ConnectionTestResponse(success=True, message="连接成功")
         else:
-            return ConnectionTestResponse(success=False, message="Connection failed")
+            # Update connection status to offline
+            server.connection_status = ConnectionStatus.OFFLINE
+            db.commit()
+            return ConnectionTestResponse(success=False, message="连接失败")
     except SSHConnectionError as e:
+        # Update connection status to offline
+        server.connection_status = ConnectionStatus.OFFLINE
+        db.commit()
         return ConnectionTestResponse(success=False, message=str(e))
 
 

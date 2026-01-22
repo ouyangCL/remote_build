@@ -22,12 +22,9 @@ export default {
   streamLogs: (id: number) => {
     const token = localStorage.getItem('access_token')
     const baseUrl = import.meta.env.VITE_API_URL || '/api'
-    const url = `${baseUrl}/deployments/${id}/logs`
+    // 将 token 作为查询参数传递，因为 EventSource 不支持自定义 headers
+    const url = `${baseUrl}/deployments/${id}/logs?token=${token}`
 
-    return new EventSource(url, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
-    })
+    return new EventSource(url)
   },
 }

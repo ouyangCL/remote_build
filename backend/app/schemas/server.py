@@ -30,15 +30,22 @@ class ServerUpdate(BaseModel):
     port: int | None = Field(None, ge=1, le=65535)
     username: str | None = Field(None, min_length=1, max_length=50)
     auth_type: str | None = Field(None, pattern="^(password|ssh_key)$")
-    auth_value: str | None = None
+    auth_value: str | None = Field(None, min_length=0)  # Empty means keep existing
     deploy_path: str | None = Field(None, max_length=255)
 
 
-class ServerResponse(ServerBase):
-    """Server response schema."""
+class ServerResponse(BaseModel):
+    """Server response schema - does not include auth_value for security."""
 
     id: int
+    name: str
+    host: str
+    port: int
+    username: str
+    auth_type: str
+    deploy_path: str
     is_active: bool
+    connection_status: str
     created_at: datetime
     updated_at: datetime
 

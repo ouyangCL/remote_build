@@ -37,19 +37,12 @@
             </el-form-item>
 
             <el-form-item label="分支">
-              <el-select
+              <el-input
                 v-model="form.branch"
-                placeholder="请选择分支"
-                :loading="loadingBranches"
+                placeholder="请输入分支名称（如：main、develop）"
                 style="width: 100%"
-              >
-                <el-option
-                  v-for="branch in branches"
-                  :key="branch"
-                  :label="branch"
-                  :value="branch"
-                />
-              </el-select>
+                clearable
+              />
             </el-form-item>
 
             <el-form-item label="服务器组">
@@ -155,8 +148,6 @@ import type { Project, ServerGroup, DeploymentLog, Environment } from '@/types'
 
 const projects = ref<Project[]>([])
 const serverGroups = ref<ServerGroup[]>([])
-const branches = ref<string[]>([])
-const loadingBranches = ref(false)
 const deploying = ref(false)
 const logs = ref<string[]>([])
 const logsContainer = ref<HTMLElement>()
@@ -220,21 +211,11 @@ async function loadData() {
   serverGroups.value = await serversApi.listGroups()
 }
 
-async function handleProjectChange() {
+function handleProjectChange() {
   if (!form.project_id) return
 
   // 清空服务器组选择，因为环境可能不匹配
   form.server_group_ids = []
-
-  loadingBranches.value = true
-  try {
-    const result = await projectsApi.getBranches(form.project_id)
-    branches.value = result.branches
-  } catch (err) {
-    ElMessage.error('加载分支失败')
-  } finally {
-    loadingBranches.value = false
-  }
 }
 
 async function handleDeploy() {

@@ -182,7 +182,10 @@ async def get_project_branches(
         )
 
     try:
-        branches = get_remote_branches(project.git_url, token=project.git_token)
+        branches = get_remote_branches(
+            project.git_url,
+            ssh_key=project.git_ssh_key,
+        )
         return BranchListResponse(branches=branches)
     except GitError as e:
         raise HTTPException(

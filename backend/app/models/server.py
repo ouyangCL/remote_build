@@ -37,6 +37,14 @@ class AuthType(str, enum.Enum):
     SSH_KEY = "ssh_key"
 
 
+class ConnectionStatus(str, enum.Enum):
+    """Server connection status."""
+
+    UNTESTED = "untested"
+    ONLINE = "online"
+    OFFLINE = "offline"
+
+
 class Server(Base, TimestampMixin):
     """Server model."""
 
@@ -53,6 +61,9 @@ class Server(Base, TimestampMixin):
         String(255), nullable=False, default="/opt/app"
     )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    connection_status: Mapped[str] = mapped_column(
+        String(20), default=ConnectionStatus.UNTESTED, nullable=False
+    )
 
     # Relationships
     server_groups: Mapped[list["ServerGroup"]] = relationship(

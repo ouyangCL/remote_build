@@ -102,7 +102,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox, type FormInstance, type FormRules } from 'element-plus'
 import { Plus } from '@element-plus/icons-vue'
-import { users } from '@/api'
+import { users as usersApi } from '@/api'
 import { useAuthStore } from '@/stores/auth'
 import { formatDate } from '@/utils/date'
 import type { User, UserCreate, UserUpdate } from '@/types'
@@ -186,7 +186,7 @@ async function toggleUser(user: User) {
     return
   }
   try {
-    await users.toggleUser(user.id)
+    await usersApi.toggleUser(user.id)
     ElMessage.success('用户状态已更新')
     await loadUsers()
   } catch (error) {
@@ -210,7 +210,7 @@ function confirmDelete(user: User) {
   )
     .then(async () => {
       try {
-        await users.deleteUser(user.id)
+        await usersApi.deleteUser(user.id)
         ElMessage.success('用户已删除')
         await loadUsers()
       } catch (error) {
@@ -239,12 +239,12 @@ async function submitForm() {
         if (form.value.password) {
           (data as UserUpdate).password = form.value.password
         }
-        await users.updateUser(form.value.id!, data as UserUpdate)
+        await usersApi.updateUser(form.value.id!, data as UserUpdate)
         ElMessage.success('用户已更新')
       } else {
         // Create mode - password is required
         (data as UserCreate).password = form.value.password
-        await users.createUser(data as UserCreate)
+        await usersApi.createUser(data as UserCreate)
         ElMessage.success('用户已创建')
       }
 
@@ -261,7 +261,7 @@ async function submitForm() {
 async function loadUsers() {
   loading.value = true
   try {
-    users.value = await users.listUsers()
+    users.value = await usersApi.listUsers()
   } catch (error) {
     console.error('Load users failed:', error)
   } finally {

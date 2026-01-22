@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from app.models.audit_log import AuditAction
 from app.core.permissions import Permission
 from app.db.session import get_db
-from app.dependencies import get_current_user
+from app.dependencies import get_current_user, get_current_user_from_token
 from app.models.deployment import Deployment, DeploymentStatus
 from app.models.project import Project
 from app.models.server import ServerGroup
@@ -176,7 +176,7 @@ async def get_deployment(
 async def get_deployment_logs(
     deployment_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_user_from_token),
 ) -> StreamingResponse:
     """Stream deployment logs via Server-Sent Events."""
     deployment = db.query(Deployment).filter(Deployment.id == deployment_id).first()

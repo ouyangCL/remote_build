@@ -94,7 +94,7 @@ class DeploymentService:
             with git_context(
                 self.deployment.project.git_url,
                 self.deployment.branch,
-                token=self.deployment.project.git_token,
+                ssh_key=self.deployment.project.git_ssh_key,
             ) as git_service:
                 git_info = git_service.get_info()
                 self.deployment.commit_hash = git_info.commit_hash
@@ -123,7 +123,7 @@ class DeploymentService:
         # Clone repo for building
         git_service = GitService(
             self.deployment.project.git_url,
-            token=self.deployment.project.git_token,
+            ssh_key=self.deployment.project.git_ssh_key,
         )
         try:
             git_service.clone(work_dir)
@@ -209,7 +209,7 @@ class DeploymentService:
                 await self.logger.info(f"Extracting to {server.deploy_path}")
                 exit_code, stdout, stderr = conn.execute_command(
                     f"mkdir -p {server.deploy_path} && "
-                    f"tar -xzf {remote_temp} -C {server.deploy_path} && "
+                    f"unzip -o {remote_temp} -d {server.deploy_path} && "
                     f"rm {remote_temp}"
                 )
 

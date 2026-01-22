@@ -70,9 +70,9 @@ export interface Server {
   port: number
   username: string
   auth_type: 'password' | 'ssh_key'
-  auth_value: string
   deploy_path: string
   is_active: boolean
+  connection_status: 'untested' | 'online' | 'offline'
   created_at: string
   updated_at: string
 }

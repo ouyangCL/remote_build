@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Any
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 
 
 class UserBase(BaseModel):
@@ -12,6 +12,14 @@ class UserBase(BaseModel):
     email: EmailStr | None = None
     role: str = Field(..., pattern="^(admin|operator|viewer)$")
     is_active: bool = True
+
+    @field_validator('email')
+    @classmethod
+    def empty_email_to_none(cls, v: str | None) -> str | None:
+        """Convert empty string to None."""
+        if v is None or v.strip() == '':
+            return None
+        return v
 
 
 class UserCreate(UserBase):

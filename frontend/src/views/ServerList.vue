@@ -18,8 +18,8 @@
         <el-table-column prop="auth_type" label="认证类型" width="100" />
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
-            <el-tag :type="row.is_active ? 'success' : 'info'">
-              {{ row.is_active ? '活跃' : '未激活' }}
+            <el-tag :type="getConnectionStatusType(row.connection_status)">
+              {{ getConnectionStatusLabel(row.connection_status) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -73,13 +73,10 @@
         <el-form-item label="密码/密钥" prop="auth_value">
           <el-input
             v-model="form.auth_value"
-            :type="showPassword ? 'text' : 'password'"
-            placeholder="密码或SSH私钥内容"
-          >
-            <template #append>
-              <el-button @click="showPassword = !showPassword" :icon="showPassword ? View : Hide" />
-            </template>
-          </el-input>
+            type="password"
+            :placeholder="isEdit ? '留空则保持原密码不变' : '密码或SSH私钥内容'"
+            show-password="false"
+          />
         </el-form-item>
 
         <el-form-item label="部署路径" prop="deploy_path">
@@ -100,7 +97,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Connection, View, Hide } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Connection } from '@element-plus/icons-vue'
 import { servers as serversApi } from '@/api'
 import type { Server } from '@/types'
 
@@ -109,7 +106,6 @@ const loading = ref(false)
 const dialogVisible = ref(false)
 const isEdit = ref(false)
 const submitting = ref(false)
-const showPassword = ref(false)
 const formRef = ref()
 const currentServer = ref<Server | null>(null)
 
@@ -123,12 +119,38 @@ const form = reactive({
   deploy_path: '/opt/app',
 })
 
-const rules = {
+const rules = reactive({
   name: [{ required: true, message: '必填', trigger: 'blur' }],
   host: [{ required: true, message: '必填', trigger: 'blur' }],
   username: [{ required: true, message: '必填', trigger: 'blur' }],
   auth_type: [{ required: true, message: '必填', trigger: 'change' }],
-  auth_value: [{ required: true, message: '必填', trigger: 'blur' }],
+  auth_value: [{ required: false, message: '必填', trigger: 'blur' }],
+})
+
+// 更新验证规则
+function updateValidationRules(isEdit: boolean) {
+  const authValueRule = rules.auth_value[0]
+  authValueRule.required = !isEdit
+}
+
+// 获取连接状态标签
+function getConnectionStatusLabel(status: string): string {
+  const statusMap: Record<string, string> = {
+    untested: '未测试',
+    online: '在线',
+    offline: '离线'
+  }
+  return statusMap[status] || '未知'
+}
+
+// 获取连接状态类型
+function getConnectionStatusType(status: string): string {
+  const typeMap: Record<string, string> = {
+    untested: 'info',
+    online: 'success',
+    offline: 'danger'
+  }
+  return typeMap[status] || 'info'
 }
 
 async function loadData() {
@@ -142,7 +164,7 @@ async function loadData() {
 
 function handleCreate() {
   isEdit.value = false
-  showPassword.value = false
+  updateValidationRules(false)
   Object.assign(form, {
     name: '',
     host: '',
@@ -157,8 +179,18 @@ function handleCreate() {
 
 function handleEdit(server: Server) {
   isEdit.value = true
+  updateValidationRules(true)
   currentServer.value = server
-  Object.assign(form, server)
+  // 编辑时不显示原密码，让用户决定是否更新
+  Object.assign(form, {
+    name: server.name,
+    host: server.host,
+    port: server.port,
+    username: server.username,
+    auth_type: server.auth_type,
+    auth_value: '',
+    deploy_path: server.deploy_path,
+  })
   dialogVisible.value = true
 }
 
@@ -168,7 +200,12 @@ async function handleSubmit() {
     submitting.value = true
 
     if (isEdit.value && currentServer.value) {
-      await serversApi.updateServer(currentServer.value.id, form)
+      // 编辑时，如果密码为空则不发送该字段（保持原密码不变）
+      const updateData = { ...form }
+      if (updateData.auth_value === '') {
+        delete updateData.auth_value
+      }
+      await serversApi.updateServer(currentServer.value.id, updateData)
       ElMessage.success('服务器已更新')
     } else {
       await serversApi.createServer(form)
@@ -198,6 +235,8 @@ async function handleTest(server: Server) {
     } else {
       ElMessage.error(result.message || '连接失败')
     }
+    // 重新加载数据以更新连接状态
+    loadData()
   } catch {
     loading.close()
     ElMessage.error('连接测试失败')

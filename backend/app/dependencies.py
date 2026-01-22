@@ -1,7 +1,7 @@
 """Dependency injection for FastAPI."""
 from typing import Annotated
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
@@ -10,6 +10,65 @@ from app.db.session import get_db
 from app.models.user import User, UserRole
 
 security = HTTPBearer()
+
+
+def get_current_user_from_token(
+    token: str | None = Query(None),
+    db: Session = Depends(get_db),
+) -> User:
+    """Get current authenticated user from JWT token in query parameter.
+
+    This is used for SSE endpoints where EventSource doesn't support custom headers.
+
+    Args:
+        token: JWT token from query parameter
+        db: Database session
+
+    Returns:
+        Current user
+
+    Raises:
+        HTTPException: If token is invalid or user not found
+    """
+    if token is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication token required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    payload = decode_access_token(token)
+
+    if payload is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user_id: int = int(payload.get("sub"))
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    user = db.query(User).filter(User.id == user_id).first()
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="User account is inactive",
+        )
+
+    return user
 
 
 def get_current_user(
