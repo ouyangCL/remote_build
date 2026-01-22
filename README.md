@@ -14,82 +14,75 @@ An automated deployment platform supporting Git-based projects, build management
 
 ## Tech Stack
 
-- **Backend**: FastAPI + SQLAlchemy + PostgreSQL
+- **Backend**: FastAPI + SQLAlchemy + SQLite
 - **Frontend**: Vue 3 + Element Plus + TypeScript
-- **Deployment**: Docker + Docker Compose
+- **Deployment**: Systemd + Nginx (Production) / Native (Development)
 
 ## Quick Start
 
 ### Prerequisites
 
-- Docker and Docker Compose
+- Python 3.11+
+- Node.js 20+
 - Git
-- Python 3.11+ (for local development)
-- Node.js 20+ (for local development)
-
-### Using Docker Compose (Recommended)
-
-1. Clone the repository:
-```bash
-git clone <repository-url>
-cd devops
-```
-
-2. Start the services:
-```bash
-docker-compose up -d
-```
-
-3. Initialize the admin user:
-```bash
-curl -X POST http://localhost/api/auth/init
-```
-
-4. Access the application:
-- Frontend: http://localhost
-- API: http://localhost:8000
-- Default credentials: `admin` / `admin123`
 
 ### Local Development
 
-#### Backend
+一键启动开发模式：
 
-1. Install dependencies:
 ```bash
+./scripts/dev.sh
+```
+
+或手动启动：
+
+```bash
+# 后端
 cd backend
 pip install -r requirements.txt
-```
-
-2. Configure environment:
-```bash
-cp .env.example .env
-# Edit .env with your settings
-```
-
-3. Initialize database:
-```bash
 alembic upgrade head
-```
+uvicorn app.main:app --host 0.0.0.0 --port 9090 --reload
 
-4. Run the server:
-```bash
-uvicorn app.main:app --reload
-```
-
-#### Frontend
-
-1. Install dependencies:
-```bash
+# 前端（新终端）
 cd frontend
 npm install
-```
-
-2. Start dev server:
-```bash
 npm run dev
 ```
 
-3. Access at http://localhost:5173
+访问地址：
+- Frontend: http://localhost:5173
+- Backend API: http://localhost:9090
+- Default credentials: `admin` / `admin123`
+
+### Production Deployment
+
+生产环境使用 systemd + nginx 部署：
+
+```bash
+# 1. 运行部署脚本（需要 root 权限）
+sudo ./scripts/deploy.sh
+
+# 2. 编辑生产环境配置
+sudo nano /opt/devops/backend/.env.production
+
+# 3. 重新部署
+sudo ./scripts/deploy.sh
+```
+
+服务管理命令：
+
+```bash
+# 启动/停止/重启服务
+sudo systemctl start devops-backend
+sudo systemctl stop devops-backend
+sudo systemctl restart devops-backend
+
+# 查看服务状态
+sudo systemctl status devops-backend
+
+# 查看日志
+sudo journalctl -u devops-backend -f
+```
 
 ## Configuration
 
@@ -97,13 +90,29 @@ npm run dev
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `DATABASE_URL` | PostgreSQL connection string | `sqlite:///./devops.db` |
+| `DATABASE_URL` | SQLite database path | `sqlite:///./data/devops.db` |
 | `SECRET_KEY` | JWT signing key | - |
 | `ENCRYPTION_KEY` | SSH credentials encryption key | - |
 | `CORS_ORIGINS` | Allowed CORS origins | `http://localhost:5173` |
 | `WORK_DIR` | Working directory for builds | `./work` |
 | `ARTIFACTS_DIR` | Deployment artifacts directory | `./artifacts` |
 | `LOGS_DIR` | Logs directory | `./logs` |
+
+### Production Setup
+
+生产环境部署目录：
+
+```
+/opt/devops/
+├── backend/         # 后端代码
+│   ├── venv/        # Python 虚拟环境
+│   ├── data/        # SQLite 数据库
+│   ├── work/        # 构建工作区
+│   ├── artifacts/   # 部署包存档
+│   └── logs/        # 日志
+└── frontend/
+    └── dist/        # 前端构建产物
+```
 
 ### Project Setup
 
@@ -153,10 +162,13 @@ devops/
 │   │   └── types/          # TypeScript types
 │   └── package.json
 │
-└── docker/
-    ├── docker-compose.yml
-    ├── Dockerfile.backend
-    └── Dockerfile.frontend
+├── scripts/                 # 部署脚本
+│   ├── dev.sh              # 本地开发启动
+│   └── deploy.sh           # 生产环境部署
+│
+└── deploy/                  # 生产环境配置
+    ├── devops-backend.service   # systemd 配置
+    └── devops-nginx.conf        # nginx 配置
 ```
 
 ## Deployment Flow
