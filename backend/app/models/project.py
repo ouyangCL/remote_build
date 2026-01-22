@@ -17,6 +17,7 @@ class ProjectType(str, enum.Enum):
 
     FRONTEND = "frontend"
     BACKEND = "backend"
+    JAVA = "java"
 
 
 class Project(Base, TimestampMixin):

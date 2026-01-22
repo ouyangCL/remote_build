@@ -54,7 +54,7 @@ export interface Project {
   name: string
   description?: string
   git_url: string
-  project_type: 'frontend' | 'backend'
+  project_type: 'frontend' | 'backend' | 'java'
   build_script: string
   deploy_script_path: string
   output_dir: string

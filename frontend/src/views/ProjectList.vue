@@ -69,9 +69,10 @@
         </el-form-item>
 
         <el-form-item label="项目类型" prop="project_type">
-          <el-select v-model="form.project_type" style="width: 100%">
-            <el-option label="前端" value="frontend" />
-            <el-option label="后端" value="backend" />
+          <el-select v-model="form.project_type" style="width: 100%" @change="handleProjectTypeChange">
+            <el-option label="前端 (Vue3/Vite)" value="frontend" />
+            <el-option label="后端 (Node/Python)" value="backend" />
+            <el-option label="Java (Maven)" value="java" />
           </el-select>
         </el-form-item>
 
@@ -161,6 +162,44 @@ function getEnvironmentColor(env: Environment) {
 
 function getEnvironmentIcon(env: Environment) {
   return ENVIRONMENT_DISPLAY[env].icon
+}
+
+// 项目类型预设模板
+const PROJECT_TEMPLATES: Record<string, { build_script: string; output_dir: string; deploy_script_path: string }> = {
+  frontend: {
+    build_script: 'npm run build',
+    output_dir: 'dist',
+    deploy_script_path: '/opt/restart.sh',
+  },
+  backend: {
+    build_script: 'npm run build',
+    output_dir: 'dist',
+    deploy_script_path: '/opt/restart.sh',
+  },
+  java: {
+    build_script: 'mvn clean package',
+    output_dir: 'target',
+    deploy_script_path: '/opt/restart-java.sh',
+  },
+}
+
+// 项目类型切换处理
+function handleProjectTypeChange(projectType: string) {
+  const template = PROJECT_TEMPLATES[projectType]
+  if (template) {
+    // 只有在新建且字段为空时才自动填充
+    if (!isEdit.value) {
+      if (!form.build_script) {
+        form.build_script = template.build_script
+      }
+      if (form.output_dir === 'dist') {  // 只有默认值时才替换
+        form.output_dir = template.output_dir
+      }
+      if (form.deploy_script_path === '/opt/restart.sh') {
+        form.deploy_script_path = template.deploy_script_path
+      }
+    }
+  }
 }
 
 async function loadData() {

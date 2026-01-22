@@ -10,7 +10,7 @@ class ProjectBase(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     description: str | None = None
     git_url: str = Field(..., min_length=1, max_length=500)
-    project_type: str = Field(..., pattern="^(frontend|backend)$")
+    project_type: str = Field(..., pattern="^(frontend|backend|java)$")
     build_script: str = Field(..., min_length=1)
     deploy_script_path: str = Field(default="/opt/restart.sh", max_length=255)
     output_dir: str = Field(default="dist", max_length=255)
@@ -30,7 +30,7 @@ class ProjectUpdate(BaseModel):
     description: str | None = None
     git_url: str | None = Field(None, min_length=1, max_length=500)
     git_token: str | None = Field(None, max_length=255, description="Git access token for private repositories")
-    project_type: str | None = Field(None, pattern="^(frontend|backend)$")
+    project_type: str | None = Field(None, pattern="^(frontend|backend|java)$")
     build_script: str | None = None
     deploy_script_path: str | None = Field(None, max_length=255)
     output_dir: str | None = Field(None, max_length=255)
