@@ -15,3 +15,243 @@ body {
   width: 100%;
   min-height: 100vh;
 }
+
+/* ====================
+   全局响应式样式
+   ==================== */
+
+/* Element Plus 组件移动端适配 */
+@media (max-width: 768px) {
+  /* 卡片组件 */
+  .el-card {
+    border-radius: 8px;
+  }
+
+  .el-card__header {
+    padding: 15px;
+  }
+
+  .el-card__body {
+    padding: 15px;
+  }
+
+  /* 按钮组件 */
+  .el-button {
+    font-size: 14px;
+  }
+
+  .el-button--small {
+    font-size: 13px;
+    padding: 5px 10px;
+  }
+
+  /* 表格组件 */
+  .el-table {
+    font-size: 13px;
+  }
+
+  .el-table .el-table__cell {
+    padding: 10px 8px;
+  }
+
+  /* 对话框组件 */
+  .el-dialog {
+    width: 90% !important;
+    margin: 0 auto;
+  }
+
+  .el-dialog__header {
+    padding: 15px;
+  }
+
+  .el-dialog__body {
+    padding: 15px;
+  }
+
+  .el-dialog__footer {
+    padding: 15px;
+  }
+
+  /* 表单组件 */
+  .el-form-item__label {
+    font-size: 14px;
+  }
+
+  .el-input__inner,
+  .el-textarea__inner {
+    font-size: 14px;
+  }
+
+  /* 标签组件 */
+  .el-tag {
+    font-size: 12px;
+  }
+
+  .el-tag--small {
+    font-size: 11px;
+  }
+
+  /* 分页组件 */
+  .el-pagination {
+    font-size: 13px;
+  }
+
+  .el-pager li {
+    min-width: 30px;
+    height: 30px;
+    line-height: 30px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* 卡片组件 */
+  .el-card__header {
+    padding: 12px;
+  }
+
+  .el-card__body {
+    padding: 12px;
+  }
+
+  /* 按钮组件 */
+  .el-button {
+    font-size: 13px;
+    padding: 8px 15px;
+  }
+
+  .el-button--small {
+    font-size: 12px;
+    padding: 4px 8px;
+  }
+
+  /* 表格组件 */
+  .el-table {
+    font-size: 12px;
+  }
+
+  .el-table .el-table__cell {
+    padding: 8px 5px;
+  }
+
+  /* 对话框组件 */
+  .el-dialog {
+    width: 95% !important;
+  }
+
+  .el-dialog__header {
+    padding: 12px;
+  }
+
+  .el-dialog__body {
+    padding: 12px;
+  }
+
+  /* 表单组件 */
+  .el-form-item {
+    margin-bottom: 15px;
+  }
+
+  .el-form-item__label {
+    font-size: 13px;
+  }
+
+  .el-input__inner,
+  .el-textarea__inner {
+    font-size: 13px;
+  }
+
+  /* 标签组件 */
+  .el-tag {
+    font-size: 11px;
+    padding: 0 6px;
+    height: 22px;
+    line-height: 22px;
+  }
+
+  /* 分页组件 */
+  .el-pagination {
+    font-size: 12px;
+  }
+
+  .el-pager li {
+    min-width: 28px;
+    height: 28px;
+    line-height: 28px;
+    font-size: 12px;
+  }
+
+  /* 消息提示 */
+  .el-message {
+    font-size: 13px;
+    min-width: 280px;
+  }
+
+  /* 消息框 */
+  .el-message-box {
+    width: 85% !important;
+  }
+}
+
+@media (max-width: 360px) {
+  /* 对话框组件 */
+  .el-dialog {
+    width: 98% !important;
+  }
+
+  .el-dialog__header {
+    padding: 10px;
+  }
+
+  .el-dialog__body {
+    padding: 10px;
+  }
+
+  /* 表单组件 */
+  .el-form-item {
+    margin-bottom: 12px;
+  }
+
+  .el-form-item__label {
+    font-size: 12px;
+  }
+
+  /* 标签组件 */
+  .el-tag {
+    font-size: 10px;
+    padding: 0 4px;
+    height: 20px;
+    line-height: 20px;
+  }
+
+  /* 按钮组件 */
+  .el-button {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+
+  /* 分页组件 */
+  .el-pager li {
+    min-width: 26px;
+    height: 26px;
+    line-height: 26px;
+    font-size: 11px;
+  }
+}
+
+/* 触摸优化 - 增大可点击区域 */
+@media (hover: none) and (pointer: coarse) {
+  .el-button,
+  .el-link,
+  .el-table__body-wrapper .el-button__text {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .el-table__body-wrapper .el-button {
+    padding: 10px 15px;
+  }
+
+  .el-menu-item {
+    min-height: 48px;
+  }
+}

@@ -343,4 +343,70 @@ onUnmounted(() => {
   color: #808080;
   margin-right: 10px;
 }
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .deployment-console {
+    padding: 10px;
+  }
+
+  :deep(.el-row) {
+    flex-direction: column;
+  }
+
+  :deep(.el-col) {
+    width: 100% !important;
+    max-width: 100%;
+    margin-bottom: 15px;
+  }
+
+  .logs-container {
+    height: 300px;
+    padding: 10px;
+    font-size: 11px;
+  }
+
+  .log-entry {
+    padding: 2px 0;
+  }
+
+  .log-time {
+    font-size: 10px;
+  }
+}
+
+/* 小屏移动端适配 */
+@media (max-width: 480px) {
+  .deployment-console {
+    padding: 5px;
+  }
+
+  :deep(.el-form-item__label) {
+    width: 80px !important;
+    font-size: 13px;
+  }
+
+  .logs-container {
+    height: 250px;
+    padding: 8px;
+    font-size: 10px;
+  }
+
+  :deep(.el-card__body) {
+    padding: 15px;
+  }
+}
+
+/* 超小屏适配 */
+@media (max-width: 360px) {
+  :deep(.el-form-item__label) {
+    width: 70px !important;
+    font-size: 12px;
+  }
+
+  .logs-container {
+    height: 200px;
+    padding: 5px;
+  }
+}
 </style>

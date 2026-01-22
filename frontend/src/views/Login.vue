@@ -87,15 +87,59 @@ async function handleLogin() {
   align-items: center;
   min-height: 100vh;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  padding: 20px;
 }
 
 .login-card {
   width: 400px;
+  max-width: 100%;
 }
 
 .login-card h2 {
   margin: 0;
   text-align: center;
   color: #333;
+}
+
+/* 移动端适配 */
+@media (max-width: 480px) {
+  .login-container {
+    padding: 15px;
+  }
+
+  .login-card {
+    width: 100%;
+  }
+
+  .login-card :deep(.el-card__header) {
+    padding: 15px;
+  }
+
+  .login-card h2 {
+    font-size: 18px;
+  }
+
+  .login-card :deep(.el-card__body) {
+    padding: 15px;
+  }
+}
+
+/* 小屏移动端适配 */
+@media (max-width: 360px) {
+  .login-container {
+    padding: 10px;
+  }
+
+  .login-card :deep(.el-card__header) {
+    padding: 12px;
+  }
+
+  .login-card h2 {
+    font-size: 16px;
+  }
+
+  .login-card :deep(.el-card__body) {
+    padding: 12px;
+  }
 }
 </style>

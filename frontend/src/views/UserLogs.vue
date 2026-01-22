@@ -269,4 +269,112 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
 }
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .audit-logs {
+    padding: 10px;
+  }
+
+  .header h2 {
+    font-size: 18px;
+  }
+
+  /* 筛选表单适配 */
+  .filter-card :deep(.el-form) {
+    flex-direction: column;
+  }
+
+  .filter-card :deep(.el-form-item) {
+    width: 100%;
+    margin-right: 0;
+  }
+
+  .filter-card :deep(.el-select),
+  .filter-card :deep(.el-date-picker) {
+    width: 100% !important;
+  }
+
+  /* 表格移动端适配 */
+  .el-table :deep(.el-table__cell) {
+    padding: 8px 5px;
+  }
+
+  /* 隐藏ID列 */
+  .el-table :deep(.el-table__body-wrapper td:nth-child(1)) {
+    display: none;
+  }
+  .el-table :deep(.el-table__header-wrapper th:nth-child(1)) {
+    display: none;
+  }
+
+  /* 分页适配 */
+  .pagination {
+    justify-content: center;
+  }
+
+  .pagination :deep(.el-pagination) {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
+/* 小屏移动端适配 */
+@media (max-width: 480px) {
+  .audit-logs {
+    padding: 5px;
+  }
+
+  .header h2 {
+    font-size: 16px;
+  }
+
+  .el-table :deep(.el-table__cell) {
+    font-size: 12px;
+  }
+
+  /* 隐藏IP地址列 */
+  .el-table :deep(.el-table__body-wrapper td:nth-child(6)) {
+    display: none;
+  }
+  .el-table :deep(.el-table__header-wrapper th:nth-child(6)) {
+    display: none;
+  }
+
+  /* 隐藏资源类型列 */
+  .el-table :deep(.el-table__body-wrapper td:nth-child(4)) {
+    display: none;
+  }
+  .el-table :deep(.el-table__header-wrapper th:nth-child(4)) {
+    display: none;
+  }
+
+  /* 分页适配 */
+  .pagination :deep(.el-pagination__sizes),
+  .pagination :deep(.el-pagination__jump) {
+    display: none;
+  }
+}
+
+/* 超小屏适配 */
+@media (max-width: 360px) {
+  /* 隐藏时间列 */
+  .el-table :deep(.el-table__body-wrapper td:nth-child(6)) {
+    display: none;
+  }
+  .el-table :deep(.el-table__header-wrapper th:nth-child(6)) {
+    display: none;
+  }
+
+  /* 进一步简化分页 */
+  .pagination :deep(.el-pagination) {
+    font-size: 12px;
+  }
+
+  .pagination :deep(.el-pager li) {
+    min-width: 28px;
+    height: 28px;
+    line-height: 28px;
+  }
+}
 </style>

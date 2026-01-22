@@ -245,4 +245,92 @@ onMounted(() => {
 .warning-text {
   color: #f56c6c;
 }
+
+/* 移动端适配 */
+@media (max-width: 768px) {
+  .server-group-list {
+    padding: 10px;
+  }
+
+  .header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 10px;
+  }
+
+  .header span {
+    font-size: 16px;
+  }
+
+  /* 表格移动端适配 */
+  .el-table :deep(.el-table__cell) {
+    padding: 8px 5px;
+  }
+
+  /* 隐藏ID列 */
+  .el-table :deep(.el-table__body-wrapper td:nth-child(1)) {
+    display: none;
+  }
+  .el-table :deep(.el-table__header-wrapper th:nth-child(1)) {
+    display: none;
+  }
+}
+
+/* 小屏移动端适配 */
+@media (max-width: 480px) {
+  .server-group-list {
+    padding: 5px;
+  }
+
+  .header {
+    gap: 8px;
+  }
+
+  .header span {
+    font-size: 14px;
+  }
+
+  .el-table :deep(.el-table__cell) {
+    font-size: 12px;
+  }
+
+  /* 隐藏描述列 */
+  .el-table :deep(.el-table__body-wrapper td:nth-child(3)) {
+    display: none;
+  }
+  .el-table :deep(.el-table__header-wrapper th:nth-child(3)) {
+    display: none;
+  }
+
+  /* 对话框适配 */
+  :deep(.el-dialog) {
+    width: 95% !important;
+    margin: 0 auto;
+  }
+
+  :deep(.el-dialog__body) {
+    padding: 15px;
+  }
+
+  :deep(.el-form-item__label) {
+    width: 100px !important;
+    font-size: 13px;
+  }
+}
+
+/* 超小屏适配 */
+@media (max-width: 360px) {
+  /* 隐藏服务器列 */
+  .el-table :deep(.el-table__body-wrapper td:nth-child(5)) {
+    display: none;
+  }
+  .el-table :deep(.el-table__header-wrapper th:nth-child(5)) {
+    display: none;
+  }
+
+  :deep(.el-form-item__label) {
+    width: 80px !important;
+    font-size: 12px;
+  }
+}
 </style>
