@@ -273,15 +273,28 @@ echo "{self.git_token}"
             # Setup authentication for remote operations
             env = self._setup_auth()
 
-            # Fetch all remote branches
-            self.repo.git.fetch(env=env)
+            # For shallow clones, fetch the specific branch directly
+            # Using explicit refspec to fetch only the requested branch
+            try:
+                self.repo.git.fetch(
+                    'origin',
+                    f'+refs/heads/{branch_name}:refs/remotes/origin/{branch_name}',
+                    env=env
+                )
+            except GitCommandError as e:
+                # Branch doesn't exist on remote
+                if f"couldn't find remote ref {branch_name}" in str(e).lower() or \
+                   "couldn't find" in str(e).lower():
+                    raise GitError(
+                        f"Branch '{branch_name}' not found in remote repository"
+                    ) from e
+                raise
 
-            # Try to find the remote branch
+            # Check if the remote branch now exists
             remote_branch = f"origin/{branch_name}"
-            remote_refs = [ref.name for ref in self.repo.references]
-
-            # Check if remote branch exists
-            if f"refs/remotes/{remote_branch}" not in remote_refs:
+            try:
+                self.repo.refs[f"refs/remotes/{remote_branch}"]
+            except IndexError:
                 raise GitError(
                     f"Branch '{branch_name}' not found in remote repository"
                 )
@@ -296,7 +309,7 @@ echo "{self.git_token}"
                 # Local branch doesn't exist, create new tracking branch
                 self.repo.git.checkout(f"{remote_branch}", b=branch_name)
 
-            # Pull latest changes
+            # Pull latest changes (no-op for shallow clone, but keeps for consistency)
             self.repo.remotes.origin.pull(env=env)
         except GitCommandError as e:
             raise GitError(f"Failed to checkout branch '{branch_name}': {e}") from e
@@ -368,23 +381,23 @@ echo "{self.git_token}"
             # Setup authentication for remote operations
             env = self._setup_auth()
 
-            # Fetch all remote branches
-            self.repo.remotes.origin.fetch(env=env)
+            # For shallow clones, use ls-remote to get all branch references from remote
+            # This works even when local refs are incomplete due to shallow clone
+            refs_output = self.repo.git.ls_remote('origin', heads=True, env=env)
 
             branches = []
-            for ref in self.repo.references:
-                name = ref.name
-                # Extract branch name from refs/heads/ or refs/remotes/origin/
-                if name.startswith("refs/heads/"):
-                    branches.append(name.replace("refs/heads/", ""))
-                elif name.startswith("refs/remotes/origin/"):
-                    branch_name = name.replace("refs/remotes/origin/", "")
-                    # Skip HEAD reference
-                    if branch_name != "HEAD":
+            for line in refs_output.split('\n'):
+                if not line.strip():
+                    continue
+                # ls-remote output format: <commit-hash>\trefs/heads/<branch-name>
+                parts = line.split('\t')
+                if len(parts) == 2 and parts[1].startswith('refs/heads/'):
+                    branch_name = parts[1].replace('refs/heads/', '')
+                    if branch_name:  # Skip empty branch names
                         branches.append(branch_name)
 
-            # Remove duplicates and sort
-            return sorted(set(branches))
+            # Sort branches
+            return sorted(branches)
         except GitCommandError as e:
             raise GitError(f"Failed to get branches: {e}") from e
         finally:
