@@ -41,6 +41,7 @@ class LogBuffer:
         self.buffer: deque[LogEntry] = deque(maxlen=max_size)
         self._subscribers: set[asyncio.Queue] = set()
         self._lock = asyncio.Lock()
+        self._closed = False  # Track if buffer is closed
 
     async def subscribe(self) -> asyncio.Queue:
         """Subscribe to log updates.
@@ -48,6 +49,12 @@ class LogBuffer:
         Returns:
             Queue for receiving log updates
         """
+        if self._closed:
+            # Return a closed queue if buffer is closed
+            queue: asyncio.Queue[LogEntry] = asyncio.Queue()
+            await queue.put(None)  # Signal closed
+            return queue
+
         queue: asyncio.Queue[LogEntry] = asyncio.Queue()
         async with self._lock:
             self._subscribers.add(queue)
@@ -57,6 +64,18 @@ class LogBuffer:
                 await queue.put(entry)
 
         return queue
+
+    async def close(self) -> None:
+        """Close the buffer and notify all subscribers."""
+        async with self._lock:
+            self._closed = True
+            # Send close signal to all subscribers
+            for queue in list(self._subscribers):
+                try:
+                    await queue.put(None)
+                except Exception:
+                    pass
+            self._subscribers.clear()
 
     async def unsubscribe(self, queue: asyncio.Queue) -> None:
         """Unsubscribe from log updates.
@@ -74,6 +93,9 @@ class LogBuffer:
             level: Log level
             content: Log content
         """
+        if self._closed:
+            return
+
         entry = LogEntry(
             level=level,
             content=content,
@@ -84,7 +106,7 @@ class LogBuffer:
 
         # Notify subscribers
         async with self._lock:
-            for queue in self._subscribers:
+            for queue in list(self._subscribers):
                 try:
                     await queue.put(entry)
                 except Exception:
@@ -199,6 +221,10 @@ async def remove_log_buffer(deployment_id: int) -> None:
     """
     async with _buffers_lock:
         if deployment_id in _log_buffers:
+            # Close the buffer to notify all subscribers
+            await _log_buffers[deployment_id].close()
+            # Wait a bit for subscribers to receive the close signal
+            await asyncio.sleep(0.1)
             del _log_buffers[deployment_id]
 
 
@@ -303,13 +329,26 @@ async def stream_deployment_logs(
     queue = await buffer.subscribe()
 
     try:
+        # Send initial marker to indicate connection established
+        yield f"data: [SYSTEM] Stream connected for deployment {deployment_id}\n\n"
+
         while True:
             # Send keepalive every 30 seconds
             try:
                 entry = await asyncio.wait_for(queue.get(), timeout=30.0)
+
+                # Check for close signal (None)
+                if entry is None:
+                    # Buffer closed, send end signal and exit
+                    yield f"data: [SYSTEM] Stream closed for deployment {deployment_id}\n\n"
+                    break
+
                 yield f"data: {entry.level.value} {entry.timestamp.isoformat()} {entry.content}\n\n"
             except asyncio.TimeoutError:
                 yield ": keepalive\n\n"
+    except GeneratorExit:
+        # Client disconnected
+        pass
     finally:
         await buffer.unsubscribe(queue)
 

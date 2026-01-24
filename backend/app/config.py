@@ -51,6 +51,8 @@ class Settings(BaseSettings):
     max_concurrent_deployments: int = 5
     build_timeout_seconds: int = 3600  # 1 hour
     ssh_timeout_seconds: int = 300  # 5 minutes
+    # 日志详细度: "minimal" (仅关键节点) 或 "detailed" (完整日志)
+    deployment_log_verbosity: Literal["minimal", "detailed"] = "minimal"
 
     # CORS
     cors_origins: list[str] = ["http://localhost:5050", "http://localhost:3000"]

@@ -169,12 +169,17 @@ class BuildService:
         Raises:
             BuildError: If build fails
         """
-        self._log_info("=" * 50)
+        # minimal 模式下移除过多的分隔线
+        if settings.deployment_log_verbosity == "detailed":
+            self._log_info("=" * 50)
+
         self._log_info("开始构建过程")
-        self._log_info("=" * 50)
-        self._log_info(f"源代码目录: {self.source_dir}")
-        self._log_info(f"输出目录: {self.output_dir}")
-        self._log_info(f"构建脚本: {self.build_script}")
+
+        if settings.deployment_log_verbosity == "detailed":
+            self._log_info(f"源代码目录: {self.source_dir}")
+            self._log_info(f"输出目录: {self.output_dir}")
+            self._log_info(f"构建脚本: {self.build_script}")
+            self._log_info("=" * 50)
 
         try:
             # Execute build script
@@ -218,12 +223,15 @@ class BuildService:
             else:
                 size_str = f"{file_size / (1024 * 1024):.2f} MB"
 
-            self._log_info("=" * 50)
+            if settings.deployment_log_verbosity == "detailed":
+                self._log_info("=" * 50)
             self._log_info("构建完成！")
-            self._log_info("=" * 50)
+            if settings.deployment_log_verbosity == "detailed":
+                self._log_info("=" * 50)
             self._log_info(f"产物路径: {artifact_path}")
-            self._log_info(f"产物大小: {size_str} ({file_size} 字节)")
-            self._log_info(f"SHA256 校验和: {checksum}")
+            self._log_info(f"产物大小: {size_str}")
+            if settings.deployment_log_verbosity == "detailed":
+                self._log_info(f"SHA256 校验和: {checksum}")
 
             return BuildResult(
                 status=BuildStatus.SUCCESS,
@@ -247,11 +255,7 @@ class BuildService:
         """
         import subprocess
 
-        self._log_info("-" * 50)
         self._log_info("执行构建脚本")
-        self._log_info("-" * 50)
-        self._log_info(f"命令: {self.build_script}")
-        self._log_info(f"工作目录: {self.source_dir}")
 
         # Parse build script into command and arguments
         parts = self.build_script.split()
@@ -265,22 +269,37 @@ class BuildService:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 text=True,
-                bufsize=1,  # Line buffered
             )
 
-            self._log_info("构建输出:")
-            self._log_info("-" * 50)
+            if settings.deployment_log_verbosity == "minimal":
+                # 简化模式：收集输出，只显示结果
+                stdout, _ = process.communicate()
 
-            # Stream output
-            line_count = 0
-            for line in process.stdout or []:
-                line = line.rstrip()
-                if line:
-                    self._log_info(f"  {line}")
-                    line_count += 1
+                if process.returncode != 0:
+                    # 失败时显示完整输出
+                    self._log_error("构建失败，输出:")
+                    for line in stdout.splitlines():
+                        self._log_error(f"  {line}")
+                else:
+                    self._log_info("构建完成")
+            else:
+                # 详细模式：streaming 输出
+                self._log_info("-" * 50)
+                self._log_info(f"命令: {self.build_script}")
+                self._log_info(f"工作目录: {self.source_dir}")
+                self._log_info("-" * 50)
+                self._log_info("构建输出:")
 
-            self._log_info("-" * 50)
-            self._log_info(f"构建脚本执行完成，共输出 {line_count} 行")
+                # Stream output
+                line_count = 0
+                for line in process.stdout or []:
+                    line = line.rstrip()
+                    if line:
+                        self._log_info(f"  {line}")
+                        line_count += 1
+
+                self._log_info("-" * 50)
+                self._log_info(f"构建脚本执行完成，共输出 {line_count} 行")
 
             process.wait()
             return process.returncode
@@ -313,11 +332,13 @@ class BuildService:
         artifact_name = f"artifact_{timestamp}.zip"
         artifact_path = artifacts_dir / artifact_name
 
-        self._log_info("-" * 50)
+        if settings.deployment_log_verbosity == "detailed":
+            self._log_info("-" * 50)
         self._log_info("创建部署产物")
-        self._log_info("-" * 50)
-        self._log_info(f"源目录: {source_path}")
-        self._log_info(f"产物路径: {artifact_path}")
+        if settings.deployment_log_verbosity == "detailed":
+            self._log_info("-" * 50)
+            self._log_info(f"源目录: {source_path}")
+            self._log_info(f"产物路径: {artifact_path}")
 
         # Count files before compression
         file_count = 0
@@ -328,16 +349,17 @@ class BuildService:
                 file_path = os.path.join(root, file)
                 total_size += os.path.getsize(file_path)
 
-        # Format total size for display
-        if total_size < 1024:
-            total_size_str = f"{total_size} B"
-        elif total_size < 1024 * 1024:
-            total_size_str = f"{total_size / 1024:.2f} KB"
-        else:
-            total_size_str = f"{total_size / (1024 * 1024):.2f} MB"
+        if settings.deployment_log_verbosity == "detailed":
+            # Format total size for display
+            if total_size < 1024:
+                total_size_str = f"{total_size} B"
+            elif total_size < 1024 * 1024:
+                total_size_str = f"{total_size / 1024:.2f} KB"
+            else:
+                total_size_str = f"{total_size / (1024 * 1024):.2f} MB"
 
-        self._log_info(f"打包文件数量: {file_count}")
-        self._log_info(f"源文件总大小: {total_size_str}")
+            self._log_info(f"打包文件数量: {file_count}")
+            self._log_info(f"源文件总大小: {total_size_str}")
         self._log_info("正在压缩...")
 
         # Create zip archive
@@ -357,11 +379,13 @@ class BuildService:
         else:
             compressed_size_str = f"{compressed_size / (1024 * 1024):.2f} MB"
 
-        compression_ratio = (1 - compressed_size / total_size) * 100 if total_size > 0 else 0
-
-        self._log_info(f"压缩后大小: {compressed_size_str}")
-        self._log_info(f"压缩率: {compression_ratio:.1f}%")
-        self._log_info("-" * 50)
+        if settings.deployment_log_verbosity == "detailed":
+            compression_ratio = (1 - compressed_size / total_size) * 100 if total_size > 0 else 0
+            self._log_info(f"压缩后大小: {compressed_size_str}")
+            self._log_info(f"压缩率: {compression_ratio:.1f}%")
+            self._log_info("-" * 50)
+        else:
+            self._log_info(f"压缩完成: {compressed_size_str}")
 
         return artifact_path
 

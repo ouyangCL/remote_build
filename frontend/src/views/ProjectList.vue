@@ -131,8 +131,12 @@
           <el-input v-model="form.output_dir" placeholder="dist" />
         </el-form-item>
 
-        <el-form-item label="重启脚本" prop="deploy_script_path">
-          <el-input v-model="form.deploy_script_path" placeholder="/opt/restart.sh" />
+        <el-form-item label="上传路径" prop="upload_path">
+          <el-input v-model="form.upload_path" placeholder="/application/back/charge-back/temp" />
+        </el-form-item>
+
+        <el-form-item label="重启脚本" prop="restart_script_path">
+          <el-input v-model="form.restart_script_path" placeholder="/application/back/charge-back/restartFromTemp.sh" />
         </el-form-item>
       </el-form>
 
@@ -174,7 +178,8 @@ const form = reactive({
   environment: 'development' as Environment,
   build_script: '',
   output_dir: 'dist',
-  deploy_script_path: '/opt/restart.sh',
+  upload_path: '',
+  restart_script_path: '/application/back/charge-back/restartFromTemp.sh',
 })
 
 const rules = {
@@ -198,21 +203,24 @@ function getEnvironmentIcon(env: Environment) {
 }
 
 // 项目类型预设模板
-const PROJECT_TEMPLATES: Record<string, { build_script: string; output_dir: string; deploy_script_path: string }> = {
+const PROJECT_TEMPLATES: Record<string, { build_script: string; output_dir: string; upload_path: string; restart_script_path: string }> = {
   frontend: {
     build_script: 'npm run build',
     output_dir: 'dist',
-    deploy_script_path: '/opt/restart.sh',
+    upload_path: '/application/front/dist/temp',
+    restart_script_path: '/application/front/restartFromTemp.sh',
   },
   backend: {
     build_script: 'npm run build',
     output_dir: 'dist',
-    deploy_script_path: '/opt/restart.sh',
+    upload_path: '/application/back/temp',
+    restart_script_path: '/application/back/restartFromTemp.sh',
   },
   java: {
     build_script: 'mvn clean package',
     output_dir: 'target',
-    deploy_script_path: '/opt/restart-java.sh',
+    upload_path: '/application/back/temp',
+    restart_script_path: '/application/back/restartFromTemp.sh',
   },
 }
 
@@ -241,8 +249,11 @@ function handleProjectTypeChange(projectType: string) {
       if (form.output_dir === 'dist') {  // 只有默认值时才替换
         form.output_dir = template.output_dir
       }
-      if (form.deploy_script_path === '/opt/restart.sh') {
-        form.deploy_script_path = template.deploy_script_path
+      if (!form.upload_path) {
+        form.upload_path = template.upload_path
+      }
+      if (form.restart_script_path === '/application/back/charge-back/restartFromTemp.sh') {
+        form.restart_script_path = template.restart_script_path
       }
     }
   }
@@ -270,7 +281,8 @@ function handleCreate() {
     environment: 'development' as Environment,
     build_script: '',
     output_dir: 'dist',
-    deploy_script_path: '/opt/restart.sh',
+    upload_path: '',
+    restart_script_path: '/application/back/charge-back/restartFromTemp.sh',
   })
   dialogVisible.value = true
 }

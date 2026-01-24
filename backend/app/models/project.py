@@ -41,7 +41,12 @@ class Project(Base, TimestampMixin):
     git_ssh_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     project_type: Mapped[ProjectType] = mapped_column(String(20), nullable=False)
     build_script: Mapped[str] = mapped_column(Text, nullable=False)
-    deploy_script_path: Mapped[str] = mapped_column(
+    # Upload path for deployment packages (server-side path)
+    upload_path: Mapped[str] = mapped_column(
+        String(255), nullable=False, default=""
+    )
+    # Restart script path to execute after deployment
+    restart_script_path: Mapped[str] = mapped_column(
         String(255), nullable=False, default="/opt/restart.sh"
     )
     output_dir: Mapped[str] = mapped_column(

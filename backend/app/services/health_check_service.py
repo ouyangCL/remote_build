@@ -5,6 +5,7 @@ from typing import Callable
 
 import httpx
 
+from app.config import settings
 from app.core.ssh import SSHConnection, SSHLogger, create_ssh_connection
 from app.models.project import HealthCheckType, Project
 from app.models.server import Server
@@ -118,52 +119,53 @@ class HealthCheckService:
         # Replace localhost with server host if needed
         if "localhost" in url or "127.0.0.1" in url:
             url = url.replace("localhost", self.server.host).replace("127.0.0.1", self.server.host)
-            await self.logger.info(f"替换为服务器地址: {url}")
+            if settings.deployment_log_verbosity == "detailed":
+                await self.logger.info(f"替换为服务器地址: {url}")
 
-        await self.logger.info(
-            f"HTTP 健康检查: {url} (超时: {timeout}s, 重试: {retries}次, 间隔: {interval}s)"
-        )
+        if settings.deployment_log_verbosity == "detailed":
+            await self.logger.info(
+                f"HTTP 健康检查: {url} (超时: {timeout}s, 重试: {retries}次, 间隔: {interval}s)"
+            )
+        else:
+            await self.logger.info(f"HTTP 健康检查: {url}")
 
         async with httpx.AsyncClient(timeout=timeout) as client:
             for attempt in range(1, retries + 1):
                 try:
-                    await self.logger.info(f"HTTP 健康检查尝试 {attempt}/{retries}")
+                    # 只在 detailed 模式下记录每次尝试
+                    if settings.deployment_log_verbosity == "detailed":
+                        await self.logger.info(f"HTTP 健康检查尝试 {attempt}/{retries}")
 
                     response = await client.get(url)
                     status_code = response.status_code
 
-                    await self.logger.info(
-                        f"HTTP 响应状态码: {status_code}"
-                    )
-
-                    # Accept 2xx and 3xx status codes
                     if 200 <= status_code < 400:
-                        await self.logger.info(
-                            f"HTTP 健康检查成功 (状态码: {status_code})"
-                        )
+                        # minimal 模式下只记录最终成功一次
+                        await self.logger.info("健康检查通过")
                         return True
                     else:
-                        await self.logger.warning(
-                            f"HTTP 健康检查失败 (状态码: {status_code})"
-                        )
+                        if settings.deployment_log_verbosity == "detailed":
+                            await self.logger.warning(
+                                f"HTTP 健康检查失败 (状态码: {status_code})"
+                            )
 
                 except httpx.TimeoutException:
-                    await self.logger.warning(f"HTTP 健康检查超时 (尝试 {attempt}/{retries})")
+                    if settings.deployment_log_verbosity == "detailed":
+                        await self.logger.warning(f"HTTP 健康检查超时 (尝试 {attempt}/{retries})")
                 except httpx.ConnectError as e:
-                    await self.logger.warning(
-                        f"HTTP 连接失败: {e} (尝试 {attempt}/{retries})"
-                    )
+                    if settings.deployment_log_verbosity == "detailed":
+                        await self.logger.warning(f"HTTP 连接失败: {e}")
                 except Exception as e:
-                    await self.logger.warning(
-                        f"HTTP 健康检查异常: {e} (尝试 {attempt}/{retries})"
-                    )
+                    if settings.deployment_log_verbosity == "detailed":
+                        await self.logger.warning(f"HTTP 健康检查异常: {e}")
 
                 # Wait before retry (except on last attempt)
                 if attempt < retries:
-                    await self.logger.info(f"等待 {interval} 秒后重试...")
+                    if settings.deployment_log_verbosity == "detailed":
+                        await self.logger.info(f"等待 {interval} 秒后重试...")
                     await asyncio.sleep(interval)
 
-        await self.logger.error(f"HTTP 健康检查失败 (已重试 {retries} 次)")
+        await self.logger.error("健康检查失败")
         return False
 
     async def _check_tcp(self) -> bool:
@@ -181,13 +183,17 @@ class HealthCheckService:
         retries = self.project.health_check_retries
         interval = self.project.health_check_interval
 
-        await self.logger.info(
-            f"TCP 健康检查: {host}:{port} (超时: {timeout}s, 重试: {retries}次, 间隔: {interval}s)"
-        )
+        if settings.deployment_log_verbosity == "detailed":
+            await self.logger.info(
+                f"TCP 健康检查: {host}:{port} (超时: {timeout}s, 重试: {retries}次, 间隔: {interval}s)"
+            )
+        else:
+            await self.logger.info(f"TCP 健康检查: {host}:{port}")
 
         for attempt in range(1, retries + 1):
             try:
-                await self.logger.info(f"TCP 健康检查尝试 {attempt}/{retries}")
+                if settings.deployment_log_verbosity == "detailed":
+                    await self.logger.info(f"TCP 健康检查尝试 {attempt}/{retries}")
 
                 # Create socket and attempt connection
                 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -197,28 +203,28 @@ class HealthCheckService:
                 sock.close()
 
                 if result == 0:
-                    await self.logger.info(
-                        f"TCP 端口 {port} 连接成功"
-                    )
+                    await self.logger.info("健康检查通过")
                     return True
                 else:
-                    await self.logger.warning(
-                        f"TCP 端口 {port} 连接失败 (错误码: {result})"
-                    )
+                    if settings.deployment_log_verbosity == "detailed":
+                        await self.logger.warning(
+                            f"TCP 端口 {port} 连接失败 (错误码: {result})"
+                        )
 
             except socket.timeout:
-                await self.logger.warning(f"TCP 健康检查超时 (尝试 {attempt}/{retries})")
+                if settings.deployment_log_verbosity == "detailed":
+                    await self.logger.warning(f"TCP 健康检查超时")
             except Exception as e:
-                await self.logger.warning(
-                    f"TCP 健康检查异常: {e} (尝试 {attempt}/{retries})"
-                )
+                if settings.deployment_log_verbosity == "detailed":
+                    await self.logger.warning(f"TCP 健康检查异常: {e}")
 
             # Wait before retry (except on last attempt)
             if attempt < retries:
-                await self.logger.info(f"等待 {interval} 秒后重试...")
+                if settings.deployment_log_verbosity == "detailed":
+                    await self.logger.info(f"等待 {interval} 秒后重试...")
                 await asyncio.sleep(interval)
 
-        await self.logger.error(f"TCP 健康检查失败 (已重试 {retries} 次)")
+        await self.logger.error("健康检查失败")
         return False
 
     async def _check_command(self) -> bool:
@@ -238,49 +244,64 @@ class HealthCheckService:
         retries = self.project.health_check_retries
         interval = self.project.health_check_interval
 
-        await self.logger.info(
-            f"命令健康检查: '{command}' (超时: {timeout}s, 重试: {retries}次, 间隔: {interval}s)"
-        )
+        if settings.deployment_log_verbosity == "detailed":
+            await self.logger.info(
+                f"命令健康检查: '{command}' (超时: {timeout}s, 重试: {retries}次, 间隔: {interval}s)"
+            )
+        else:
+            await self.logger.info(f"命令健康检查")
 
-        # Change to deploy directory before executing command
-        full_command = f"cd {self.server.deploy_path} && {command}"
+        # Change to project's upload path before executing command
+        upload_path = self.project.upload_path
+        if not upload_path:
+            raise HealthCheckError("项目未配置 upload_path，无法执行命令健康检查")
+
+        full_command = f"cd {upload_path} && {command}"
 
         for attempt in range(1, retries + 1):
             try:
-                await self.logger.info(f"命令健康检查尝试 {attempt}/{retries}")
+                if settings.deployment_log_verbosity == "detailed":
+                    await self.logger.info(f"命令健康检查尝试 {attempt}/{retries}")
 
-                # Execute command with streaming output
-                exit_code, stdout, stderr = self.ssh_connection.execute_command_streaming(
-                    full_command,
-                    on_stdout=lambda line: asyncio.create_task(
-                        self.logger.info(f"[stdout] {line}")
-                    ),
-                    on_stderr=lambda line: asyncio.create_task(
-                        self.logger.info(f"[stderr] {line}")
-                    ),
-                )
-
-                await self.logger.info(f"命令退出码: {exit_code}")
-
-                if exit_code == 0:
-                    await self.logger.info("命令健康检查成功")
-                    return True
+                # minimal 模式下不 streaming 输出
+                if settings.deployment_log_verbosity == "minimal":
+                    exit_code, stdout, stderr = self.ssh_connection.execute_command(full_command)
+                    if exit_code == 0:
+                        await self.logger.info("健康检查通过")
+                        return True
                 else:
-                    await self.logger.warning(
-                        f"命令健康检查失败 (退出码: {exit_code})"
+                    # Execute command with streaming output
+                    exit_code, stdout, stderr = self.ssh_connection.execute_command_streaming(
+                        full_command,
+                        on_stdout=lambda line: asyncio.create_task(
+                            self.logger.info(f"[stdout] {line}")
+                        ),
+                        on_stderr=lambda line: asyncio.create_task(
+                            self.logger.info(f"[stderr] {line}")
+                        ),
                     )
 
+                    await self.logger.info(f"命令退出码: {exit_code}")
+
+                    if exit_code == 0:
+                        await self.logger.info("命令健康检查成功")
+                        return True
+                    else:
+                        await self.logger.warning(
+                            f"命令健康检查失败 (退出码: {exit_code})"
+                        )
+
             except Exception as e:
-                await self.logger.warning(
-                    f"命令健康检查异常: {e} (尝试 {attempt}/{retries})"
-                )
+                if settings.deployment_log_verbosity == "detailed":
+                    await self.logger.warning(f"命令健康检查异常: {e}")
 
             # Wait before retry (except on last attempt)
             if attempt < retries:
-                await self.logger.info(f"等待 {interval} 秒后重试...")
+                if settings.deployment_log_verbosity == "detailed":
+                    await self.logger.info(f"等待 {interval} 秒后重试...")
                 await asyncio.sleep(interval)
 
-        await self.logger.error(f"命令健康检查失败 (已重试 {retries} 次)")
+        await self.logger.error("健康检查失败")
         return False
 
 

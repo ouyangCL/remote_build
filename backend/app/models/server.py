@@ -57,9 +57,6 @@ class Server(Base, TimestampMixin):
     username: Mapped[str] = mapped_column(String(50), nullable=False)
     auth_type: Mapped[AuthType] = mapped_column(String(20), default=AuthType.PASSWORD, nullable=False)
     auth_value: Mapped[str] = mapped_column(Text, nullable=False)  # Encrypted password or key
-    deploy_path: Mapped[str] = mapped_column(
-        String(255), nullable=False, default="/opt/app"
-    )
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     connection_status: Mapped[str] = mapped_column(
         String(20), default=ConnectionStatus.UNTESTED, nullable=False

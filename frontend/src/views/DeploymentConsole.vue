@@ -493,7 +493,21 @@ function connectSSEWithRetry(deploymentId: number): boolean {
     eventSource.onmessage = (e) => {
       if (e.data === ': keepalive') return
 
-      const [level, timestamp, ...contentParts] = e.data.split(' ')
+      const data = e.data.trim()
+
+      // 检查系统消息
+      if (data.startsWith('[SYSTEM]')) {
+        console.log('System message:', data)
+
+        // 检查是否为关闭信号
+        if (data.includes('Stream closed')) {
+          console.log('SSE stream closed by server')
+          cleanupSSE()
+        }
+        return
+      }
+
+      const [level, timestamp, ...contentParts] = data.split(' ')
       const content = contentParts.join(' ')
 
       logs.value.push({ level, timestamp, content, id: Date.now() })
@@ -616,6 +630,11 @@ async function handleDeploy() {
   currentDeployment.value = null
   usePolling = false  // 重置轮询标志
   sseReconnectAttempts = 0  // 重置SSE重连计数
+  maxLogId = 0  // 重置日志ID跟踪
+
+  // 停止所有现有的连接和轮询
+  cleanupSSE()
+  stopStatusPolling()
 
   try {
     const deployment = await deploymentsApi.create({

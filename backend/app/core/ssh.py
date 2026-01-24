@@ -17,6 +17,7 @@ from paramiko.ssh_exception import (
     SSHException,
 )
 
+from app.config import settings
 from app.core.security import decrypt_data
 from app.models.server import AuthType, Server
 
@@ -104,9 +105,14 @@ class SSHConnection:
         auth_value = self.config.decrypt_auth()
 
         try:
-            # Log authentication method
+            # Log authentication method (仅 detailed 模式)
+            if settings.deployment_log_verbosity == "detailed":
+                if self.config.auth_type == AuthType.PASSWORD:
+                    _run_async(self._logger.info("使用 密码 认证"))
+                else:  # SSH_KEY
+                    _run_async(self._logger.info("使用 SSH密钥 认证"))
+
             if self.config.auth_type == AuthType.PASSWORD:
-                _run_async(self._logger.info("使用 密码 认证"))
                 self.client.connect(
                     hostname=self.config.host,
                     port=self.config.port,
@@ -115,7 +121,6 @@ class SSHConnection:
                     timeout=30,
                 )
             else:  # SSH_KEY
-                _run_async(self._logger.info("使用 SSH密钥 认证"))
                 # Handle key-based authentication
                 import tempfile
 
@@ -140,7 +145,7 @@ class SSHConnection:
                         Path(key_file).unlink()
 
             # Log successful connection
-            _run_async(self._logger.info("SSH 连接成功建立"))
+            _run_async(self._logger.info(f"已连接到服务器 {self.config.host}"))
 
         except AuthenticationException as e:
             _run_async(self._logger.error(f"SSH 连接失败: 认证失败 - {e}"))
@@ -266,51 +271,73 @@ class SSHConnection:
             self._logger.info(f"开始上传 {filename} (文件大小: {size_mb:.2f} MB)")
         )
 
-        # Progress tracking
-        last_progress = 0
         start_time = time.time()
 
-        def progress_callback(transferred_size: int, total_size: int) -> None:
-            nonlocal last_progress
+        # minimal 模式下不使用进度回调
+        if settings.deployment_log_verbosity == "detailed":
+            # Progress tracking
+            last_progress = 0
 
-            current_time = time.time()
-            duration = current_time - start_time
-            transferred_mb = transferred_size / (1024 * 1024)
-            total_mb = total_size / (1024 * 1024)
-            progress = int((transferred_size / total_size) * 100)
+            def progress_callback(transferred_size: int, total_size: int) -> None:
+                nonlocal last_progress
 
-            # Log every 10% progress
-            if progress >= last_progress + 10 or progress == 100:
+                current_time = time.time()
+                duration = current_time - start_time
+                transferred_mb = transferred_size / (1024 * 1024)
+                total_mb = total_size / (1024 * 1024)
+                progress = int((transferred_size / total_size) * 100)
+
+                # Log every 10% progress
+                if progress >= last_progress + 10 or progress == 100:
+                    _run_async(
+                        self._logger.info(
+                            f"上传进度: {progress}% ({transferred_mb:.2f}/{total_mb:.2f} MB)"
+                        )
+                    )
+                    last_progress = progress
+
+            try:
+                # Use put with callback for progress tracking
+                self.sftp.put(str(local_path), str(remote_path), callback=progress_callback)
+
+                # Log upload complete
+                duration = time.time() - start_time
+                speed_mb = size_mb / duration if duration > 0 else 0
                 _run_async(
                     self._logger.info(
-                        f"上传进度: {progress}% ({transferred_mb:.2f}/{total_mb:.2f} MB)"
+                        f"上传完成 (耗时: {duration:.2f}秒, 速度: {speed_mb:.2f} MB/s)"
                     )
                 )
-                last_progress = progress
 
-        try:
-            # Use put with callback for progress tracking
-            self.sftp.put(str(local_path), str(remote_path), callback=progress_callback)
-
-            # Log upload complete
-            duration = time.time() - start_time
-            speed_mb = size_mb / duration if duration > 0 else 0
-            _run_async(
-                self._logger.info(
-                    f"上传完成 (耗时: {duration:.2f}秒, 速度: {speed_mb:.2f} MB/s)"
+            except Exception as e:
+                # Log upload error
+                duration = time.time() - start_time
+                transferred_mb = (last_progress / 100) * size_mb
+                _run_async(
+                    self._logger.error(
+                        f"上传失败: {e} (已传输: {transferred_mb:.2f} MB)"
+                    )
                 )
-            )
+                raise
+        else:
+            # 简化模式：直接上传，无进度回调
+            try:
+                self.sftp.put(str(local_path), str(remote_path))
 
-        except Exception as e:
-            # Log upload error
-            duration = time.time() - start_time
-            transferred_mb = (last_progress / 100) * size_mb
-            _run_async(
-                self._logger.error(
-                    f"上传失败: {e} (已传输: {transferred_mb:.2f} MB)"
+                # Log upload complete
+                duration = time.time() - start_time
+                _run_async(
+                    self._logger.info(
+                        f"上传完成 (耗时: {duration:.1f}秒)"
+                    )
                 )
-            )
-            raise
+
+            except Exception as e:
+                # Log upload error
+                _run_async(
+                    self._logger.error(f"上传失败: {e}")
+                )
+                raise
 
     def upload_fileobj(self, fileobj: io.BytesIO, remote_path: str | Path) -> None:
         """Upload a file-like object to the remote server.
@@ -389,9 +416,6 @@ class SSHConnection:
         if self.client:
             self.client.close()
             self.client = None
-
-        # Log connection closure
-        _run_async(self._logger.info("SSH 连接已关闭"))
 
     def __enter__(self) -> "SSHConnection":
         """Context manager entry."""

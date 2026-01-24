@@ -2,9 +2,17 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+from app.config import settings
 from app.models.deployment import DeploymentStatus
 from app.models.project import HealthCheckType, ProjectType
 from app.services.health_check_service import HealthCheckError, HealthCheckService
+
+
+@pytest.fixture(autouse=True)
+def detailed_logging_mode():
+    """Use detailed logging mode in tests to maintain compatibility."""
+    with patch.object(settings, 'deployment_log_verbosity', 'detailed'):
+        yield
 
 
 @pytest.fixture
@@ -27,7 +35,6 @@ def mock_server():
     """Create a mock server."""
     server = MagicMock()
     server.host = "192.168.1.100"
-    server.deploy_path = "/opt/app"
     server.is_active = True
     return server
 

@@ -78,10 +78,6 @@
             show-password="false"
           />
         </el-form-item>
-
-        <el-form-item label="部署路径" prop="deploy_path">
-          <el-input v-model="form.deploy_path" placeholder="/opt/app" />
-        </el-form-item>
       </el-form>
 
       <template #footer>
@@ -116,7 +112,6 @@ const form = reactive({
   username: '',
   auth_type: 'password',
   auth_value: '',
-  deploy_path: '/opt/app',
 })
 
 const rules = reactive({
@@ -172,7 +167,6 @@ function handleCreate() {
     username: '',
     auth_type: 'password',
     auth_value: '',
-    deploy_path: '/opt/app',
   })
   dialogVisible.value = true
 }
@@ -189,7 +183,6 @@ function handleEdit(server: Server) {
     username: server.username,
     auth_type: server.auth_type,
     auth_value: '',
-    deploy_path: server.deploy_path,
   })
   dialogVisible.value = true
 }

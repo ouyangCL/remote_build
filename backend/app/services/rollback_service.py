@@ -140,11 +140,16 @@ class RollbackService:
                 remote_temp = f"/tmp/{artifact_path.name}"
                 conn.upload_file(artifact_path, remote_temp)
 
-                # Extract to deploy path
-                await self.logger.info(f"Extracting to {server.deploy_path}")
+                # Extract to project's upload path
+                project = self.source_deployment.project
+                upload_path = project.upload_path
+                if not upload_path:
+                    raise RollbackError("项目未配置 upload_path，无法回滚")
+
+                await self.logger.info(f"Extracting to {upload_path}")
                 exit_code, stdout, stderr = conn.execute_command(
-                    f"mkdir -p {server.deploy_path} && "
-                    f"tar -xzf {remote_temp} -C {server.deploy_path} && "
+                    f"mkdir -p {upload_path} && "
+                    f"tar -xzf {remote_temp} -C {upload_path} && "
                     f"rm {remote_temp}"
                 )
 
@@ -152,13 +157,21 @@ class RollbackService:
                     raise RollbackError(f"Failed to extract artifact: {stderr}")
 
                 # Execute restart script
-                if self.source_deployment.project.deploy_script_path:
+                if self.source_deployment.project.restart_script_path:
+                    script_path = self.source_deployment.project.restart_script_path
+
+                    # Check if it's an inline command (contains shell operators) or a file path
+                    is_inline_command = any(char in script_path for char in ['&', '|', ';', '$', '`', '(', ')', '\n', '>'])
+
+                    if is_inline_command:
+                        command = f"cd {upload_path} && {script_path}"
+                    else:
+                        command = f"cd {upload_path} && bash {script_path}"
+
                     await self.logger.info(
-                        f"Executing restart script: {self.source_deployment.project.deploy_script_path}"
+                        f"Executing restart script"
                     )
-                    exit_code, stdout, stderr = conn.execute_command(
-                        f"bash {self.source_deployment.project.deploy_script_path}"
-                    )
+                    exit_code, stdout, stderr = conn.execute_command(command)
 
                     if exit_code != 0:
                         await self.logger.warning(f"Restart script failed: {stderr}")

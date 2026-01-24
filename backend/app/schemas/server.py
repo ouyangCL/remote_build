@@ -13,7 +13,6 @@ class ServerBase(BaseModel):
     username: str = Field(..., min_length=1, max_length=50)
     auth_type: str = Field(default="password", pattern="^(password|ssh_key)$")
     auth_value: str = Field(..., min_length=1)  # Will be encrypted
-    deploy_path: str = Field(default="/opt/app", max_length=255)
 
 
 class ServerCreate(ServerBase):
@@ -31,7 +30,6 @@ class ServerUpdate(BaseModel):
     username: str | None = Field(None, min_length=1, max_length=50)
     auth_type: str | None = Field(None, pattern="^(password|ssh_key)$")
     auth_value: str | None = Field(None, min_length=0)  # Empty means keep existing
-    deploy_path: str | None = Field(None, max_length=255)
 
 
 class ServerResponse(BaseModel):
@@ -43,7 +41,6 @@ class ServerResponse(BaseModel):
     port: int
     username: str
     auth_type: str
-    deploy_path: str
     is_active: bool
     connection_status: str
     created_at: datetime

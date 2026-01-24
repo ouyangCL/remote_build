@@ -343,7 +343,7 @@ class DeploymentService:
             server: Server to deploy to
             artifact_path: Path to deployment artifact
         """
-        await self.logger.info(f"Deploying to server: {server.name} ({server.host})")
+        await self.logger.info(f"部署到服务器: {server.name}")
 
         try:
             # Create SSH logger adapter
@@ -351,83 +351,91 @@ class DeploymentService:
             conn = create_ssh_connection(server, logger=ssh_logger)
 
             with conn:
-                # Upload artifact
-                remote_temp = f"/tmp/{artifact_path.name}"
-                await self.logger.info(f"上传部署产物到服务器: {remote_temp}")
-                conn.upload_file(artifact_path, remote_temp)
+                # Upload artifact to project's upload_path
+                project = self.deployment.project
+                upload_path = project.upload_path
+                if not upload_path:
+                    raise DeploymentError("项目未配置 upload_path，无法部署")
+                remote_artifact = f"{upload_path}/{artifact_path.name}"
 
-                # Extract to deploy path with detailed logging
-                await self.logger.info(f"开始解压到 {server.deploy_path}")
-                unzip_command = (
-                    f"mkdir -p {server.deploy_path} && "
-                    f"unzip -o {remote_temp} -d {server.deploy_path} && "
-                    f"rm {remote_temp}"
-                )
-                await self.logger.info(f"解压命令: {unzip_command}")
-
-                # Use streaming execution for real-time output
-                exit_code, stdout, stderr = conn.execute_command_streaming(
-                    unzip_command,
-                    on_stdout=lambda line: asyncio.create_task(
-                        self.logger.info(f"[stdout] {line}")
-                    ),
-                    on_stderr=lambda line: asyncio.create_task(
-                        self.logger.info(f"[stderr] {line}")
-                    ),
-                )
-
+                await self.logger.info(f"上传部署产物到: {remote_artifact}")
+                # Ensure upload directory exists
+                mkdir_command = f"mkdir -p {upload_path}"
+                exit_code, stdout, stderr = conn.execute_command(mkdir_command)
                 if exit_code != 0:
-                    await self.logger.error(
-                        f"解压失败，退出码: {exit_code}"
-                    )
-                    raise DeploymentError(f"Failed to extract artifact: {stderr}")
-                else:
-                    await self.logger.info(f"解压完成，退出码: {exit_code}")
+                    await self.logger.error(f"创建上传目录失败: {stderr}")
+                    raise DeploymentError(f"Failed to create upload directory: {stderr}")
 
-                # Execute restart script with detailed logging
-                if self.deployment.project.deploy_script_path:
-                    script_path = self.deployment.project.deploy_script_path
+                # Upload artifact
+                conn.upload_file(artifact_path, remote_artifact)
+                await self.logger.info(f"部署产物上传完成: {remote_artifact}")
+
+                # 解压zip包到upload_path目录
+                await self.logger.info(f"解压部署产物到: {upload_path}")
+                unzip_command = f"unzip -o {remote_artifact} -d {upload_path}"
+                exit_code, stdout, stderr = conn.execute_command(unzip_command)
+                if exit_code != 0:
+                    await self.logger.error(f"解压失败: {stderr}")
+                    raise DeploymentError(f"Failed to unzip artifact: {stderr}")
+                await self.logger.info("解压完成")
+
+                # Execute restart script
+                if project.restart_script_path:
+                    script_path = project.restart_script_path
+
+                    # 判断是否为绝对路径
+                    is_absolute_path = script_path.startswith('/')
+
+                    # 如果是相对路径且不以 ./ 开头，添加 ./ 前缀
+                    if not is_absolute_path and not script_path.startswith('./'):
+                        script_path = f'./{script_path}'
 
                     # Check if it's an inline command (contains shell operators) or a file path
                     is_inline_command = any(char in script_path for char in ['&', '|', ';', '$', '`', '(', ')', '\n', '>'])
 
                     if is_inline_command:
-                        # Execute as inline bash command
-                        await self.logger.info(f"准备执行内联部署命令")
-                        await self.logger.info(f"工作目录: {server.deploy_path}")
-                        command = f"cd {server.deploy_path} && {script_path}"
-                        await self.logger.info(f"执行命令: {command}")
+                        command = f"cd {upload_path} && {script_path}"
                     else:
-                        # Execute as script file
+                        command = f"cd {upload_path} && bash {script_path}"
+
+                    # minimal 模式下不 streaming 输出
+                    if settings.deployment_log_verbosity == "minimal":
+                        exit_code, stdout, stderr = conn.execute_command(command)
+                        if exit_code != 0:
+                            # 失败时显示完整输出
+                            await self.logger.error(f"重启脚本执行失败 (退出码: {exit_code})")
+                            for line in stderr.splitlines():
+                                await self.logger.error(f"  {line}")
+                            raise DeploymentError(f"Restart script failed: {stderr}")
+                        else:
+                            await self.logger.info("重启脚本执行成功")
+                    else:
+                        # 详细模式：streaming 输出
                         script_name = Path(script_path).name
-                        await self.logger.info(f"准备执行部署脚本: {script_name}")
-                        await self.logger.info(f"脚本路径: {script_path}")
-                        await self.logger.info(f"工作目录: {server.deploy_path}")
-                        command = f"cd {server.deploy_path} && bash {script_path}"
+                        await self.logger.info(f"准备执行重启脚本: {script_name}")
+                        await self.logger.info(f"工作目录: {upload_path}")
                         await self.logger.info(f"执行命令: {command}")
 
-                    # Execute with streaming output
-                    exit_code, stdout, stderr = conn.execute_command_streaming(
-                        command,
-                        on_stdout=lambda line: asyncio.create_task(
-                            self.logger.info(f"[stdout] {line}")
-                        ),
-                        on_stderr=lambda line: asyncio.create_task(
-                            self.logger.info(f"[stderr] {line}")
-                        ),
-                    )
-
-                    # Log exit code
-                    if exit_code != 0:
-                        await self.logger.error(
-                            f"脚本执行完成，退出码: {exit_code}"
+                        exit_code, stdout, stderr = conn.execute_command_streaming(
+                            command,
+                            on_stdout=lambda line: asyncio.create_task(
+                                self.logger.info(f"[stdout] {line}")
+                            ),
+                            on_stderr=lambda line: asyncio.create_task(
+                                self.logger.info(f"[stderr] {line}")
+                            ),
                         )
-                        await self.logger.error(f"部署脚本执行失败")
-                    else:
-                        await self.logger.info(f"脚本执行完成，退出码: {exit_code}")
-                        await self.logger.info("部署脚本执行成功")
 
-                await self.logger.info(f"Successfully deployed to {server.name}")
+                        if exit_code != 0:
+                            await self.logger.error(f"脚本执行完成，退出码: {exit_code}")
+                            await self.logger.error(f"重启脚本执行失败")
+                        else:
+                            await self.logger.info(f"脚本执行完成，退出码: {exit_code}")
+                            await self.logger.info("重启脚本执行成功")
+                else:
+                    await self.logger.warning("项目未配置重启脚本路径，跳过脚本执行")
+
+                await self.logger.info(f"成功部署到 {server.name}")
 
         except Exception as e:
             raise DeploymentError(f"Failed to deploy to {server.name}: {e}") from e
