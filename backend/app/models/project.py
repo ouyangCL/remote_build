@@ -37,7 +37,13 @@ class Project(Base, TimestampMixin):
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True, index=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     git_url: Mapped[str] = mapped_column(String(500), nullable=False)
+    # Git credentials - support three authentication methods:
+    # 1. OAuth2 token (git_token): For GitHub, GitLab, etc.
+    # 2. Basic auth (git_username + git_password): For private Git servers
+    # 3. SSH key (git_ssh_key): For SSH-based authentication
     git_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    git_username: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    git_password: Mapped[str | None] = mapped_column(String(255), nullable=True)
     git_ssh_key: Mapped[str | None] = mapped_column(Text, nullable=True)
     project_type: Mapped[ProjectType] = mapped_column(String(20), nullable=False)
     build_script: Mapped[str] = mapped_column(Text, nullable=False)
@@ -48,6 +54,10 @@ class Project(Base, TimestampMixin):
     # Restart script path to execute after deployment
     restart_script_path: Mapped[str] = mapped_column(
         String(255), nullable=False, default="/opt/restart.sh"
+    )
+    # Restart script path for restart-only deployment mode
+    restart_only_script_path: Mapped[str | None] = mapped_column(
+        String(255), nullable=True, default=None
     )
     output_dir: Mapped[str] = mapped_column(
         String(255), nullable=False, default="dist"
@@ -86,5 +96,5 @@ class Project(Base, TimestampMixin):
 
     @property
     def has_git_credentials(self) -> bool:
-        """Check if project has Git credentials configured (SSH key)."""
-        return bool(self.git_ssh_key)
+        """Check if project has Git credentials configured (any method)."""
+        return bool(self.git_token or self.git_username or self.git_ssh_key)
