@@ -33,16 +33,24 @@ api.interceptors.response.use(
   (response) => response.data,
   (error) => {
     if (error.response) {
-      const { status, data } = error.response
+      const { status, data, config } = error.response
 
+      // 处理 401 未授权错误
       if (status === 401) {
         localStorage.removeItem('access_token')
-        window.location.href = '/login'
+        // 登录接口的错误由页面组件处理，不在这里显示提示
+        if (!config?.url?.includes('/auth/login')) {
+          window.location.href = '/login'
+        }
+        return Promise.reject(error)
       }
 
-      ElMessage.error(data.detail || 'An error occurred')
+      // 登录接口的错误由页面组件处理，不显示通用提示
+      if (!config?.url?.includes('/auth/login')) {
+        ElMessage.error(data.detail || '请求失败')
+      }
     } else {
-      ElMessage.error('Network error')
+      ElMessage.error('网络错误，请检查网络连接')
     }
 
     return Promise.reject(error)

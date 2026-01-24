@@ -40,17 +40,19 @@ async def login(
     """
     user = db.query(User).filter(User.username == credentials.username).first()
 
+    # 用户名或密码错误（使用统一提示，避免用户枚举攻击）
     if not user or not verify_password(credentials.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
+            detail="用户名或密码错误",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # 用户账户已被禁用
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="User account is inactive",
+            detail="账户已被禁用，请联系管理员",
         )
 
     access_token = create_access_token(

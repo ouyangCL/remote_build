@@ -71,9 +71,9 @@ async function handleLogin() {
     ElMessage.success('登录成功')
     router.push('/')
   } catch (err: any) {
-    if (err?.message) {
-      error.value = err.message
-    }
+    // 从 API 响应中提取错误信息
+    const errorMessage = err?.response?.data?.detail || err?.message || '登录失败，请稍后重试'
+    error.value = errorMessage
   } finally {
     loading.value = false
   }
@@ -86,19 +86,27 @@ async function handleLogin() {
   justify-content: center;
   align-items: center;
   min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #f5f7fa;
   padding: 20px;
 }
 
 .login-card {
   width: 400px;
   max-width: 100%;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-radius: 8px;
+}
+
+.login-card :deep(.el-card__header) {
+  border-bottom: 1px solid #ebeef5;
+  padding: 24px 20px;
 }
 
 .login-card h2 {
   margin: 0;
   text-align: center;
-  color: #333;
+  color: #303133;
+  font-weight: 600;
 }
 
 /* 移动端适配 */
@@ -112,7 +120,7 @@ async function handleLogin() {
   }
 
   .login-card :deep(.el-card__header) {
-    padding: 15px;
+    padding: 20px 15px;
   }
 
   .login-card h2 {
@@ -120,7 +128,7 @@ async function handleLogin() {
   }
 
   .login-card :deep(.el-card__body) {
-    padding: 15px;
+    padding: 20px 15px;
   }
 }
 
@@ -131,7 +139,7 @@ async function handleLogin() {
   }
 
   .login-card :deep(.el-card__header) {
-    padding: 12px;
+    padding: 16px 12px;
   }
 
   .login-card h2 {
@@ -139,7 +147,7 @@ async function handleLogin() {
   }
 
   .login-card :deep(.el-card__body) {
-    padding: 12px;
+    padding: 16px 12px;
   }
 }
 </style>
