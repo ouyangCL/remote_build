@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.core.ssh import SSHConnection, create_ssh_connection
-from app.models.deployment import Deployment, DeploymentStatus
+from app.models.deployment import Deployment, DeploymentStatus, DeploymentType
 from app.models.server import Server, ServerGroup
 from app.models.user import User
 from app.services.build_service import BuildService, BuildError
@@ -55,36 +55,76 @@ class DeploymentService:
         """
         try:
             project = self.deployment.project
-            await self.logger.info(f"Starting deployment: {project.name} ({self.deployment.branch})")
 
-            # Step 1: Clone repository
-            await self._update_status(DeploymentStatus.CLONING)
-            await self._clone_repo()
-
-            if self._cancelled:
-                await self._handle_cancel()
-                return
-
-            # Step 2: Build project
-            await self._update_status(DeploymentStatus.BUILDING)
-            artifact_info = await self._build_project()
-
-            if self._cancelled:
-                await self._handle_cancel()
-                return
-
-            # Step 3: Deploy to servers
-            await self._update_status(DeploymentStatus.DEPLOYING)
-            await self._deploy_to_servers(artifact_info["path"])
-
-            # Step 4: Success
-            await self._update_status(DeploymentStatus.SUCCESS)
-            await self.logger.info("Deployment completed successfully")
+            if self.deployment.deployment_type == DeploymentType.RESTART_ONLY:
+                await self._restart_only_deploy()
+            else:
+                await self._full_deploy()
 
         except Exception as e:
             await self._update_status(DeploymentStatus.FAILED, str(e))
             await self.logger.error(f"Deployment failed: {e}")
             raise DeploymentError(f"Deployment failed: {e}") from e
+
+    async def _full_deploy(self) -> None:
+        """Execute full deployment process (clone, build, deploy).
+
+        Raises:
+            DeploymentError: If deployment fails
+        """
+        project = self.deployment.project
+        await self.logger.info(f"Starting full deployment: {project.name} ({self.deployment.branch})")
+
+        # Step 1: Clone repository
+        await self._update_status(DeploymentStatus.CLONING)
+        await self._clone_repo()
+
+        if self._cancelled:
+            await self._handle_cancel()
+            return
+
+        # Step 2: Build project
+        await self._update_status(DeploymentStatus.BUILDING)
+        artifact_info = await self._build_project()
+
+        if self._cancelled:
+            await self._handle_cancel()
+            return
+
+        # Step 3: Deploy to servers
+        await self._update_status(DeploymentStatus.DEPLOYING)
+        await self._deploy_to_servers(artifact_info["path"])
+
+        # Step 4: Success
+        await self._update_status(DeploymentStatus.SUCCESS)
+        await self.logger.info("Deployment completed successfully")
+
+    async def _restart_only_deploy(self) -> None:
+        """Execute restart-only deployment (no clone, no build).
+
+        Raises:
+            DeploymentError: If deployment fails
+        """
+        project = self.deployment.project
+        await self.logger.info(f"Starting restart-only deployment: {project.name}")
+
+        # Update status to restarting
+        await self._update_status(DeploymentStatus.RESTARTING)
+
+        if self._cancelled:
+            await self._handle_cancel()
+            return
+
+        # Restart servers
+        await self._restart_servers()
+
+        if self._cancelled:
+            await self._handle_cancel()
+            return
+
+        # Success
+        await self._update_status(DeploymentStatus.SUCCESS)
+        await self.logger.info("Restart-only deployment completed successfully")
 
     async def _clone_repo(self) -> None:
         """Clone Git repository."""
@@ -236,6 +276,109 @@ class DeploymentService:
 
         except Exception as e:
             raise DeploymentError(f"Failed to deploy to {server.name}: {e}") from e
+
+    async def _restart_servers(self) -> None:
+        """Restart services on all servers.
+
+        Raises:
+            DeploymentError: If restart fails
+        """
+        server_groups = self.deployment.server_groups
+
+        await self.logger.info(f"Restarting on {len(server_groups)} server group(s)")
+
+        failed_servers = []
+
+        for group in server_groups:
+            await self.logger.info(f"Restarting in server group: {group.name}")
+
+            for server in group.servers:
+                if not server.is_active:
+                    await self.logger.warning(f"Skipping inactive server: {server.name}")
+                    continue
+
+                try:
+                    await self._restart_server(server)
+                except DeploymentError as e:
+                    await self.logger.error(f"Failed to restart {server.name}: {e}")
+                    failed_servers.append(server.name)
+
+        if failed_servers:
+            await self._update_status(
+                DeploymentStatus.FAILED,
+                f"Failed to restart servers: {', '.join(failed_servers)}"
+            )
+            raise DeploymentError(f"Failed to restart servers: {', '.join(failed_servers)}")
+
+    async def _restart_server(self, server: Server) -> None:
+        """Restart service on a single server.
+
+        Args:
+            server: Server to restart
+
+        Raises:
+            DeploymentError: If restart fails
+        """
+        await self.logger.info(f"Restarting on server: {server.name} ({server.host})")
+
+        # Check if project has restart script configured
+        if not self.deployment.project.deploy_script_path:
+            raise DeploymentError(
+                f"Project {self.deployment.project.name} has no deploy_script_path configured"
+            )
+
+        try:
+            conn = create_ssh_connection(server)
+
+            with conn:
+                # Execute restart script
+                await self.logger.info(
+                    f"Executing restart script: {self.deployment.project.deploy_script_path}"
+                )
+                exit_code, stdout, stderr = conn.execute_command(
+                    f"bash {self.deployment.project.deploy_script_path}"
+                )
+
+                if exit_code != 0:
+                    raise DeploymentError(f"Restart script failed: {stderr}")
+
+                await self.logger.info("Restart script executed successfully")
+
+                # Health check - verify process is running
+                await self._health_check(conn, server)
+
+                await self.logger.info(f"Successfully restarted on {server.name}")
+
+        except DeploymentError:
+            raise
+        except Exception as e:
+            raise DeploymentError(f"Failed to restart on {server.name}: {e}") from e
+
+    async def _health_check(self, conn: SSHConnection, server: Server) -> None:
+        """Check if service process is running after restart.
+
+        Args:
+            conn: SSH connection
+            server: Server being checked
+
+        Raises:
+            DeploymentError: If health check fails
+        """
+        await self.logger.info("Performing health check...")
+
+        # Get project name for process matching
+        process_name = self.deployment.project.name.lower().replace(" ", "").replace("-", "")
+
+        # Check if process is running
+        exit_code, stdout, stderr = conn.execute_command(
+            f"ps aux | grep -E '{process_name}|python|node|java' | grep -v grep | head -1"
+        )
+
+        if exit_code == 0 and stdout.strip():
+            await self.logger.info(f"Health check passed: Process running")
+        else:
+            await self.logger.warning(f"Health check inconclusive: Could not verify process status")
+            # Don't fail deployment, just warn
 
     async def _update_status(
         self, status: DeploymentStatus, error_message: str | None = None
