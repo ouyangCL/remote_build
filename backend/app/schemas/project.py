@@ -1,7 +1,7 @@
 """Project schemas."""
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class ProjectBase(BaseModel):
@@ -16,6 +16,16 @@ class ProjectBase(BaseModel):
     deploy_script_path: str = Field(default="/opt/restart.sh", max_length=255)
     output_dir: str = Field(default="dist", max_length=255)
     environment: str = Field(default="development", pattern="^(development|production)$")
+
+    # Health Check Configuration
+    health_check_enabled: bool = Field(default=False, description="Enable health check after deployment")
+    health_check_type: str = Field(default="http", pattern="^(http|tcp|command)$", description="Type of health check")
+    health_check_url: str | None = Field(None, max_length=500, description="URL for HTTP health check (e.g., http://localhost:8080/health)")
+    health_check_port: int | None = Field(None, ge=1, le=65535, description="Port number for TCP health check")
+    health_check_command: str | None = Field(None, description="Custom command for health check")
+    health_check_timeout: int = Field(default=30, ge=1, le=300, description="Health check timeout in seconds")
+    health_check_retries: int = Field(default=3, ge=1, le=10, description="Number of retries before marking as failed")
+    health_check_interval: int = Field(default=5, ge=1, le=60, description="Interval between retries in seconds")
 
 
 class ProjectCreate(ProjectBase):
@@ -37,6 +47,16 @@ class ProjectUpdate(BaseModel):
     deploy_script_path: str | None = Field(None, max_length=255)
     output_dir: str | None = Field(None, max_length=255)
     environment: str | None = Field(None, pattern="^(development|production)$")
+
+    # Health Check Configuration
+    health_check_enabled: bool | None = Field(None, description="Enable health check after deployment")
+    health_check_type: str | None = Field(None, pattern="^(http|tcp|command)$", description="Type of health check")
+    health_check_url: str | None = Field(None, max_length=500, description="URL for HTTP health check")
+    health_check_port: int | None = Field(None, ge=1, le=65535, description="Port number for TCP health check")
+    health_check_command: str | None = Field(None, description="Custom command for health check")
+    health_check_timeout: int | None = Field(None, ge=1, le=300, description="Health check timeout in seconds")
+    health_check_retries: int | None = Field(None, ge=1, le=10, description="Number of retries before marking as failed")
+    health_check_interval: int | None = Field(None, ge=1, le=60, description="Interval between retries in seconds")
 
 
 class ProjectResponse(ProjectBase):

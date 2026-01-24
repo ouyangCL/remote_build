@@ -10,14 +10,15 @@ export default {
     branch: string
     server_group_ids: number[]
     deployment_type?: 'full' | 'restart_only'
-  }): Promise<Deployment> => api.post('/deployments', data),
+  }): Promise<Deployment> => api.post('/deployments', data, { timeout: 30000 }), // 30 seconds timeout - should return immediately
 
-  get: (id: number): Promise<Deployment> => api.get(`/deployments/${id}`),
+  get: (id: number, sinceId?: number): Promise<Deployment> =>
+    api.get(`/deployments/${id}`, { params: sinceId !== undefined ? { since_id: sinceId } : {} }),
 
   cancel: (id: number): Promise<void> => api.delete(`/deployments/${id}`),
 
   rollback: (id: number, serverGroupIds: number[]): Promise<Deployment> =>
-    api.post(`/deployments/${id}/rollback`, { server_group_ids: serverGroupIds }),
+    api.post(`/deployments/${id}/rollback`, { server_group_ids: serverGroupIds }, { timeout: 120000 }), // 2 minutes timeout
 
   // SSE log stream
   streamLogs: (id: number) => {

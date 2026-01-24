@@ -37,6 +37,7 @@ class DeploymentStatus(str, enum.Enum):
     UPLOADING = "uploading"
     DEPLOYING = "deploying"
     RESTARTING = "restarting"  # For restart_only mode
+    HEALTH_CHECKING = "health_checking"
     SUCCESS = "success"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -68,6 +69,15 @@ class Deployment(Base, TimestampMixin):
     status: Mapped[DeploymentStatus] = mapped_column(
         String(20), default=DeploymentStatus.PENDING, nullable=False, index=True
     )
+    progress: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )  # Progress percentage (0-100)
+    current_step: Mapped[str | None] = mapped_column(
+        String(50), nullable=True
+    )  # Current step name (e.g., "cloning", "building")
+    total_steps: Mapped[int] = mapped_column(
+        Integer, default=5, nullable=False
+    )  # Total number of steps
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_by: Mapped[int] = mapped_column(
         Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
@@ -101,9 +111,9 @@ class Deployment(Base, TimestampMixin):
     logs: Mapped[list["DeploymentLog"]] = relationship(
         "DeploymentLog",
         back_populates="deployment",
-        lazy="selectin",
+        lazy="noload",  # 禁用自动加载，API明确查询日志
         cascade="all, delete-orphan",
-        order_by="DeploymentLog.created_at",
+        order_by="DeploymentLog.id",  # 使用主键排序（有索引）
     )
     rollback_from: Mapped[int | None] = mapped_column(
         Integer,

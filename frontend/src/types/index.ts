@@ -54,6 +54,8 @@ export interface Project {
   name: string
   description?: string
   git_url: string
+  git_token?: string
+  git_ssh_key?: string
   project_type: 'frontend' | 'backend' | 'java'
   build_script: string
   deploy_script_path: string
@@ -91,8 +93,11 @@ export interface Deployment {
   id: number
   project_id: number
   branch: string
-  status: string
+  status: 'pending' | 'cloning' | 'building' | 'uploading' | 'deploying' | 'success' | 'failed' | 'cancelled' | 'rollback' | 'queued' | 'restarting' | 'health_checking'
   deployment_type?: 'full' | 'restart_only'
+  progress: number
+  current_step?: string
+  total_steps: number
   commit_hash?: string
   commit_message?: string
   error_message?: string
@@ -100,6 +105,7 @@ export interface Deployment {
   created_by?: number
   rollback_from?: number
   environment: Environment
+  max_log_id?: number  // 新增：最大日志ID，用于增量查询
   project?: {
     id: number
     name: string

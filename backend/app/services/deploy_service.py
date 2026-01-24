@@ -6,19 +6,111 @@ from typing import Callable
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.core.ssh import SSHConnection, create_ssh_connection
+from app.core.ssh import SSHConnection, SSHLogger, create_ssh_connection
 from app.models.deployment import Deployment, DeploymentStatus, DeploymentType
 from app.models.server import Server, ServerGroup
 from app.models.user import User
 from app.services.build_service import BuildService, BuildError
 from app.services.git_service import GitError, GitService, git_context
+from app.services.health_check_service import HealthCheckError, perform_health_check
 from app.services.log_service import DeploymentLogger, LogLevel
+
+
+class DeploymentConcurrencyManager:
+    """Manages deployment concurrency limits."""
+
+    def __init__(self, max_concurrent: int = 3):
+        """Initialize concurrency manager.
+
+        Args:
+            max_concurrent: Maximum number of concurrent deployments allowed
+        """
+        self.max_concurrent = max_concurrent
+        self._running_deployments: set[int] = set()
+        self._lock = asyncio.Lock()
+        self._semaphore = asyncio.Semaphore(max_concurrent)
+
+    async def acquire(self, deployment_id: int) -> bool:
+        """Try to acquire a deployment slot.
+
+        Args:
+            deployment_id: Deployment ID
+
+        Returns:
+            True if slot acquired, False if max concurrent reached
+        """
+        async with self._lock:
+            if len(self._running_deployments) >= self.max_concurrent:
+                return False
+
+            self._running_deployments.add(deployment_id)
+            return True
+
+    async def release(self, deployment_id: int) -> None:
+        """Release a deployment slot.
+
+        Args:
+            deployment_id: Deployment ID
+        """
+        async with self._lock:
+            self._running_deployments.discard(deployment_id)
+
+    @property
+    def running_count(self) -> int:
+        """Get current number of running deployments.
+
+        Returns:
+            Number of running deployments
+        """
+        return len(self._running_deployments)
+
+    @property
+    def available_slots(self) -> int:
+        """Get number of available deployment slots.
+
+        Returns:
+            Number of available slots
+        """
+        return self.max_concurrent - len(self._running_deployments)
+
+
+# Global concurrency manager instance
+_concurrency_manager = DeploymentConcurrencyManager(max_concurrent=3)
+
+
+def get_concurrency_manager() -> DeploymentConcurrencyManager:
+    """Get the global deployment concurrency manager.
+
+    Returns:
+        Concurrency manager instance
+    """
+    return _concurrency_manager
 
 
 class DeploymentError(Exception):
     """Deployment error."""
 
     pass
+
+
+class _DeploymentSSHLoggerAdapter(SSHLogger):
+    """Adapter to connect DeploymentLogger with SSHLogger interface."""
+
+    def __init__(self, deployment_logger: DeploymentLogger):
+        """Initialize adapter.
+
+        Args:
+            deployment_logger: Deployment logger instance
+        """
+        self._logger = deployment_logger
+
+    async def info(self, message: str) -> None:
+        """Log info message."""
+        await self._logger.info(message)
+
+    async def error(self, message: str) -> None:
+        """Log error message."""
+        await self._logger.error(message)
 
 
 class DeploymentService:
@@ -95,7 +187,20 @@ class DeploymentService:
         await self._update_status(DeploymentStatus.DEPLOYING)
         await self._deploy_to_servers(artifact_info["path"])
 
-        # Step 4: Success
+        if self._cancelled:
+            await self._handle_cancel()
+            return
+
+        # Step 4: Health check (if enabled)
+        if self.deployment.project.health_check_enabled:
+            await self._update_status(DeploymentStatus.HEALTH_CHECKING)
+            await self._perform_health_checks()
+
+            if self._cancelled:
+                await self._handle_cancel()
+                return
+
+        # Step 5: Success
         await self._update_status(DeploymentStatus.SUCCESS)
         await self.logger.info("Deployment completed successfully")
 
@@ -136,6 +241,7 @@ class DeploymentService:
                 self.deployment.branch,
                 git_token=self.deployment.project.git_token,
                 ssh_key=self.deployment.project.git_ssh_key,
+                logger=self.logger,
             ) as git_service:
                 git_info = git_service.get_info()
                 self.deployment.commit_hash = git_info.commit_hash
@@ -166,6 +272,7 @@ class DeploymentService:
             self.deployment.project.git_url,
             git_token=self.deployment.project.git_token,
             ssh_key=self.deployment.project.git_ssh_key,
+            logger=self.logger,
         )
         try:
             git_service.clone(work_dir)
@@ -179,7 +286,7 @@ class DeploymentService:
                 source_dir=work_dir,
                 build_script=self.deployment.project.build_script,
                 output_dir=self.deployment.project.output_dir,
-                on_output=lambda msg: asyncio.create_task(self.logger.info(msg)),
+                logger=self.logger,
             )
 
             # Execute build
@@ -239,38 +346,86 @@ class DeploymentService:
         await self.logger.info(f"Deploying to server: {server.name} ({server.host})")
 
         try:
-            conn = create_ssh_connection(server)
+            # Create SSH logger adapter
+            ssh_logger = _DeploymentSSHLoggerAdapter(self.logger)
+            conn = create_ssh_connection(server, logger=ssh_logger)
 
             with conn:
                 # Upload artifact
-                await self.logger.info(f"Uploading artifact to {server.host}")
                 remote_temp = f"/tmp/{artifact_path.name}"
+                await self.logger.info(f"上传部署产物到服务器: {remote_temp}")
                 conn.upload_file(artifact_path, remote_temp)
 
-                # Extract to deploy path
-                await self.logger.info(f"Extracting to {server.deploy_path}")
-                exit_code, stdout, stderr = conn.execute_command(
+                # Extract to deploy path with detailed logging
+                await self.logger.info(f"开始解压到 {server.deploy_path}")
+                unzip_command = (
                     f"mkdir -p {server.deploy_path} && "
                     f"unzip -o {remote_temp} -d {server.deploy_path} && "
                     f"rm {remote_temp}"
                 )
+                await self.logger.info(f"解压命令: {unzip_command}")
+
+                # Use streaming execution for real-time output
+                exit_code, stdout, stderr = conn.execute_command_streaming(
+                    unzip_command,
+                    on_stdout=lambda line: asyncio.create_task(
+                        self.logger.info(f"[stdout] {line}")
+                    ),
+                    on_stderr=lambda line: asyncio.create_task(
+                        self.logger.info(f"[stderr] {line}")
+                    ),
+                )
 
                 if exit_code != 0:
+                    await self.logger.error(
+                        f"解压失败，退出码: {exit_code}"
+                    )
                     raise DeploymentError(f"Failed to extract artifact: {stderr}")
+                else:
+                    await self.logger.info(f"解压完成，退出码: {exit_code}")
 
-                # Execute restart script
+                # Execute restart script with detailed logging
                 if self.deployment.project.deploy_script_path:
-                    await self.logger.info(
-                        f"Executing restart script: {self.deployment.project.deploy_script_path}"
-                    )
-                    exit_code, stdout, stderr = conn.execute_command(
-                        f"bash {self.deployment.project.deploy_script_path}"
+                    script_path = self.deployment.project.deploy_script_path
+
+                    # Check if it's an inline command (contains shell operators) or a file path
+                    is_inline_command = any(char in script_path for char in ['&', '|', ';', '$', '`', '(', ')', '\n', '>'])
+
+                    if is_inline_command:
+                        # Execute as inline bash command
+                        await self.logger.info(f"准备执行内联部署命令")
+                        await self.logger.info(f"工作目录: {server.deploy_path}")
+                        command = f"cd {server.deploy_path} && {script_path}"
+                        await self.logger.info(f"执行命令: {command}")
+                    else:
+                        # Execute as script file
+                        script_name = Path(script_path).name
+                        await self.logger.info(f"准备执行部署脚本: {script_name}")
+                        await self.logger.info(f"脚本路径: {script_path}")
+                        await self.logger.info(f"工作目录: {server.deploy_path}")
+                        command = f"cd {server.deploy_path} && bash {script_path}"
+                        await self.logger.info(f"执行命令: {command}")
+
+                    # Execute with streaming output
+                    exit_code, stdout, stderr = conn.execute_command_streaming(
+                        command,
+                        on_stdout=lambda line: asyncio.create_task(
+                            self.logger.info(f"[stdout] {line}")
+                        ),
+                        on_stderr=lambda line: asyncio.create_task(
+                            self.logger.info(f"[stderr] {line}")
+                        ),
                     )
 
+                    # Log exit code
                     if exit_code != 0:
-                        await self.logger.warning(f"Restart script failed: {stderr}")
+                        await self.logger.error(
+                            f"脚本执行完成，退出码: {exit_code}"
+                        )
+                        await self.logger.error(f"部署脚本执行失败")
                     else:
-                        await self.logger.info("Restart script executed successfully")
+                        await self.logger.info(f"脚本执行完成，退出码: {exit_code}")
+                        await self.logger.info("部署脚本执行成功")
 
                 await self.logger.info(f"Successfully deployed to {server.name}")
 
@@ -344,9 +499,6 @@ class DeploymentService:
 
                 await self.logger.info("Restart script executed successfully")
 
-                # Health check - verify process is running
-                await self._health_check(conn, server)
-
                 await self.logger.info(f"Successfully restarted on {server.name}")
 
         except DeploymentError:
@@ -354,42 +506,84 @@ class DeploymentService:
         except Exception as e:
             raise DeploymentError(f"Failed to restart on {server.name}: {e}") from e
 
-    async def _health_check(self, conn: SSHConnection, server: Server) -> None:
-        """Check if service process is running after restart.
-
-        Args:
-            conn: SSH connection
-            server: Server being checked
+    async def _perform_health_checks(self) -> None:
+        """Perform health checks on all deployed servers.
 
         Raises:
-            DeploymentError: If health check fails
+            DeploymentError: If health check fails on any server
         """
-        await self.logger.info("Performing health check...")
+        server_groups = self.deployment.server_groups
 
-        # Get project name for process matching
-        process_name = self.deployment.project.name.lower().replace(" ", "").replace("-", "")
+        await self.logger.info(f"开始对 {len(server_groups)} 个服务器组进行健康检查")
 
-        # Check if process is running
-        exit_code, stdout, stderr = conn.execute_command(
-            f"ps aux | grep -E '{process_name}|python|node|java' | grep -v grep | head -1"
-        )
+        all_passed = True
 
-        if exit_code == 0 and stdout.strip():
-            await self.logger.info(f"Health check passed: Process running")
-        else:
-            await self.logger.warning(f"Health check inconclusive: Could not verify process status")
-            # Don't fail deployment, just warn
+        for group in server_groups:
+            await self.logger.info(f"对服务器组进行健康检查: {group.name}")
+
+            for server in group.servers:
+                if not server.is_active:
+                    await self.logger.warning(
+                        f"跳过非活动服务器: {server.name}"
+                    )
+                    continue
+
+                try:
+                    # Create SSH connection for command checks
+                    ssh_logger = _DeploymentSSHLoggerAdapter(self.logger)
+                    conn = create_ssh_connection(server, logger=ssh_logger)
+
+                    with conn:
+                        # Perform health check
+                        passed = await perform_health_check(
+                            project=self.deployment.project,
+                            server=server,
+                            deployment_logger=self.logger,
+                            ssh_connection=conn,
+                        )
+
+                        if not passed:
+                            all_passed = False
+                            await self.logger.error(
+                                f"服务器 {server.name} 健康检查失败"
+                            )
+
+                except HealthCheckError as e:
+                    all_passed = False
+                    await self.logger.error(
+                        f"服务器 {server.name} 健康检查异常: {e}"
+                    )
+
+        if not all_passed:
+            raise DeploymentError("一个或多个服务器健康检查失败")
 
     async def _update_status(
         self, status: DeploymentStatus, error_message: str | None = None
     ) -> None:
-        """Update deployment status.
+        """Update deployment status and progress.
 
         Args:
             status: New status
             error_message: Error message if failed
         """
         self.deployment.status = status
+        self.deployment.current_step = status.value
+
+        # Calculate progress based on status
+        progress_map = {
+            DeploymentStatus.PENDING: 0,
+            DeploymentStatus.CLONING: 10,
+            DeploymentStatus.BUILDING: 30,
+            DeploymentStatus.UPLOADING: 60,
+            DeploymentStatus.DEPLOYING: 80,
+            DeploymentStatus.RESTARTING: 90,
+            DeploymentStatus.HEALTH_CHECKING: 95,
+            DeploymentStatus.SUCCESS: 100,
+            DeploymentStatus.FAILED: 0,
+            DeploymentStatus.CANCELLED: 0,
+        }
+        self.deployment.progress = progress_map.get(status, 0)
+
         if error_message:
             self.deployment.error_message = error_message
         self.db.commit()
@@ -402,22 +596,33 @@ class DeploymentService:
 
 async def execute_deployment(
     deployment_id: int,
-    db: Session,
 ) -> None:
     """Execute a deployment (background task).
 
+    This function creates its own database session to avoid issues with
+    the parent request's session being closed after the HTTP response.
+
     Args:
         deployment_id: Deployment ID
-        db: Database session
     """
-    deployment = db.query(Deployment).filter(Deployment.id == deployment_id).first()
-    if not deployment:
-        return
+    from app.db.session import SessionLocal
 
-    service = DeploymentService(deployment, db)
-    await service.deploy()
+    db = SessionLocal()
+    try:
+        deployment = db.query(Deployment).filter(Deployment.id == deployment_id).first()
+        if not deployment:
+            # Release concurrency slot even if deployment not found
+            await get_concurrency_manager().release(deployment_id)
+            return
 
-    # Clean up log buffer after deployment is complete
-    from app.services.log_service import remove_log_buffer
+        service = DeploymentService(deployment, db)
+        await service.deploy()
 
-    await remove_log_buffer(deployment_id)
+        # Clean up log buffer after deployment is complete
+        from app.services.log_service import remove_log_buffer
+
+        await remove_log_buffer(deployment_id)
+    finally:
+        # Always release the concurrency slot when deployment completes
+        await get_concurrency_manager().release(deployment_id)
+        db.close()

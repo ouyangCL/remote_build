@@ -55,16 +55,46 @@
           <el-input v-model="form.git_url" placeholder="https://github.com/user/repo.git" />
         </el-form-item>
 
-        <el-form-item label="Git Token">
+        <el-form-item label="认证方式">
+          <el-radio-group v-model="authMethod" @change="handleAuthMethodChange">
+            <el-radio value="token">Git Token</el-radio>
+            <el-radio value="ssh">SSH Key</el-radio>
+            <el-radio value="none">无需认证</el-radio>
+          </el-radio-group>
+        </el-form-item>
+
+        <el-form-item label="Git Token" v-if="authMethod === 'token'">
           <el-input
             v-model="form.git_token"
             type="password"
-            placeholder="私有仓库需要，可选"
+            placeholder="输入 Git Token"
             show-password
           />
           <div class="form-tip">
             <el-icon color="#909399"><InfoFilled /></el-icon>
-            <span>用于访问私有 Git 仓库，公开仓库可留空</span>
+            <span>用于访问 HTTP(S) 私有仓库</span>
+          </div>
+        </el-form-item>
+
+        <el-form-item label="SSH Key" v-if="authMethod === 'ssh'">
+          <el-input
+            v-model="form.git_ssh_key"
+            type="textarea"
+            :rows="6"
+            placeholder="-----BEGIN RSA PRIVATE KEY-----
+...
+-----END RSA PRIVATE KEY-----"
+          />
+          <div class="form-tip">
+            <el-icon color="#909399"><InfoFilled /></el-icon>
+            <span>用于访问 SSH 仓库（git@xxx.git）</span>
+          </div>
+        </el-form-item>
+
+        <el-form-item v-if="authMethod === 'none'">
+          <div class="form-tip">
+            <el-icon color="#E6A23C"><Warning /></el-icon>
+            <span class="warning-text">公开仓库无需认证，私有仓库请选择认证方式</span>
           </div>
         </el-form-item>
 
@@ -132,11 +162,14 @@ const submitting = ref(false)
 const formRef = ref()
 const currentProject = ref<Project | null>(null)
 
+const authMethod = ref<'token' | 'ssh' | 'none'>('none')
+
 const form = reactive({
   name: '',
   description: '',
   git_url: '',
   git_token: '',
+  git_ssh_key: '',
   project_type: 'frontend',
   environment: 'development' as Environment,
   build_script: '',
@@ -183,6 +216,19 @@ const PROJECT_TEMPLATES: Record<string, { build_script: string; output_dir: stri
   },
 }
 
+// 认证方式切换处理
+function handleAuthMethodChange(method: 'token' | 'ssh' | 'none') {
+  // 清空其他认证方式的字段
+  if (method === 'token') {
+    form.git_ssh_key = ''
+  } else if (method === 'ssh') {
+    form.git_token = ''
+  } else {
+    form.git_token = ''
+    form.git_ssh_key = ''
+  }
+}
+
 // 项目类型切换处理
 function handleProjectTypeChange(projectType: string) {
   const template = PROJECT_TEMPLATES[projectType]
@@ -213,11 +259,13 @@ async function loadData() {
 
 function handleCreate() {
   isEdit.value = false
+  authMethod.value = 'none'
   Object.assign(form, {
     name: '',
     description: '',
     git_url: '',
     git_token: '',
+    git_ssh_key: '',
     project_type: 'frontend',
     environment: 'development' as Environment,
     build_script: '',
@@ -231,6 +279,16 @@ function handleEdit(project: Project) {
   isEdit.value = true
   currentProject.value = project
   Object.assign(form, project)
+
+  // 自动检测认证方式
+  if (form.git_ssh_key) {
+    authMethod.value = 'ssh'
+  } else if (form.git_token) {
+    authMethod.value = 'token'
+  } else {
+    authMethod.value = 'none'
+  }
+
   dialogVisible.value = true
 }
 

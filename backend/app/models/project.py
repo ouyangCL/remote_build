@@ -2,7 +2,7 @@
 import enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import String, Text
+from sqlalchemy import Boolean, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.models.base import Base, TimestampMixin
@@ -18,6 +18,14 @@ class ProjectType(str, enum.Enum):
     FRONTEND = "frontend"
     BACKEND = "backend"
     JAVA = "java"
+
+
+class HealthCheckType(str, enum.Enum):
+    """Health check types."""
+
+    HTTP = "http"
+    TCP = "tcp"
+    COMMAND = "command"
 
 
 class Project(Base, TimestampMixin):
@@ -41,6 +49,26 @@ class Project(Base, TimestampMixin):
     )
     environment: Mapped[EnvironmentType] = mapped_column(
         String(20), default=EnvironmentType.DEVELOPMENT, nullable=False, index=True
+    )
+
+    # Health Check Configuration
+    health_check_enabled: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, index=True
+    )
+    health_check_type: Mapped[HealthCheckType] = mapped_column(
+        String(20), default=HealthCheckType.HTTP, nullable=False
+    )
+    health_check_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    health_check_port: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    health_check_command: Mapped[str | None] = mapped_column(Text, nullable=True)
+    health_check_timeout: Mapped[int] = mapped_column(
+        Integer, default=30, nullable=False
+    )
+    health_check_retries: Mapped[int] = mapped_column(
+        Integer, default=3, nullable=False
+    )
+    health_check_interval: Mapped[int] = mapped_column(
+        Integer, default=5, nullable=False
     )
 
     # Relationships

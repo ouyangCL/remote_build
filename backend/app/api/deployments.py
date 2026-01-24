@@ -1,16 +1,21 @@
 """Deployment management API routes."""
 import asyncio
+import logging
 from typing import cast
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+
+# Global task registry to prevent garbage collection
+_background_tasks: dict[int, asyncio.Task] = {}
+logger = logging.getLogger(__name__)
 
 from app.models.audit_log import AuditAction
 from app.core.permissions import Permission
 from app.db.session import get_db
 from app.dependencies import get_current_user, get_current_user_from_token
-from app.models.deployment import Deployment, DeploymentStatus
+from app.models.deployment import Deployment, DeploymentLog, DeploymentStatus
 from app.models.project import Project
 from app.models.server import ServerGroup
 from app.models.user import User, UserRole
@@ -63,6 +68,7 @@ async def list_deployments(
 async def create_deployment(
     deployment_data: DeploymentCreate,
     request: Request,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_operator),
 ) -> Deployment:
@@ -121,25 +127,118 @@ async def create_deployment(
         user_agent=user_agent,
     )
 
-    # Execute deployment in background
-    asyncio.create_task(execute_deployment(deployment.id, db))
+    # Check deployment concurrency limit
+    from app.services.deploy_service import get_concurrency_manager
+    concurrency_manager = get_concurrency_manager()
 
-    return cast(Deployment, deployment)
+    if not await concurrency_manager.acquire(deployment.id):
+        # Max concurrent deployments reached, update deployment status
+        deployment.status = DeploymentStatus.QUEUED
+        deployment.error_message = "Deployment queued: maximum concurrent deployments reached"
+        db.commit()
+
+        # Still return deployment but note it's queued
+        return cast(Deployment, deployment)
+
+    # Execute deployment in background with a new database session
+    # The background task will create its own session to avoid issues with
+    # the parent request's session being closed
+    def run_deployment_sync():
+        """Wrapper to run async deployment in background."""
+        # Create a new event loop for the background task
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        async def _run():
+            try:
+                await execute_deployment(deployment.id)
+            except Exception as e:
+                logger.error(f"Background deployment task failed for deployment {deployment.id}: {e}")
+            finally:
+                # Clean up task reference when done
+                _background_tasks.pop(deployment.id, None)
+                # Also release concurrency slot
+                await get_concurrency_manager().release(deployment.id)
+
+        loop.run_until_complete(_run())
+        loop.close()
+
+    # Use FastAPI's BackgroundTasks - executes after response is sent
+    background_tasks.add_task(run_deployment_sync)
+
+    # Manually construct the response to avoid Pydantic from_attributes serialization
+    # This prevents loading of relationships like logs, server_groups, etc.
+    from app.schemas.deployment import DeploymentResponse
+    return DeploymentResponse(
+        id=deployment.id,
+        project_id=deployment.project_id,
+        branch=deployment.branch,
+        status=str(deployment.status),
+        progress=deployment.progress,
+        current_step=deployment.current_step,
+        total_steps=deployment.total_steps,
+        commit_hash=deployment.commit_hash,
+        commit_message=deployment.commit_message,
+        error_message=deployment.error_message,
+        created_at=deployment.created_at,
+        created_by=deployment.created_by,
+        rollback_from=deployment.rollback_from,
+        environment=str(deployment.environment),
+    )
 
 
 @router.get("/{deployment_id}")
 async def get_deployment(
     deployment_id: int,
+    since_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
-    """Get deployment details."""
+    """Get deployment details.
+
+    Args:
+        deployment_id: Deployment ID
+        since_id: Optional log ID to fetch incremental logs. If provided,
+                  only returns logs with ID > since_id. If not provided,
+                  returns the most recent 500 logs.
+    """
     deployment = db.query(Deployment).filter(Deployment.id == deployment_id).first()
     if not deployment:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Deployment not found",
         )
+
+    # Build base query for logs - 优化查询性能
+    # 使用子查询获取最新的500条日志，避免desc+reversed的性能问题
+    from sqlalchemy import select, func
+
+    logs_query = db.query(DeploymentLog).filter(
+        DeploymentLog.deployment_id == deployment_id
+    )
+
+    # Apply incremental filter if since_id is provided
+    if since_id is not None:
+        # 增量查询：获取since_id之后的日志，限制100条
+        logs_query = logs_query.filter(DeploymentLog.id > since_id)
+        logs_query = logs_query.order_by(DeploymentLog.id.asc()).limit(100)
+    else:
+        # 初始查询：使用子查询获取最新的500条日志（按时间顺序）
+        # 这避免了desc+reversed的性能问题
+        subquery = (
+            db.query(DeploymentLog.id)
+            .filter(DeploymentLog.deployment_id == deployment_id)
+            .order_by(DeploymentLog.id.desc())
+            .limit(500)
+            .subquery()
+        )
+        logs_query = logs_query.filter(DeploymentLog.id.in_(select(subquery.c.id)))
+        logs_query = logs_query.order_by(DeploymentLog.id.asc())
+
+    logs = logs_query.all()
+
+    # Calculate max_log_id for next incremental query
+    max_log_id = max((log.id for log in logs), default=0)
 
     return {
         "id": deployment.id,
@@ -169,8 +268,9 @@ async def get_deployment(
                 "content": log.content,
                 "timestamp": log.created_at.isoformat(),
             }
-            for log in deployment.logs[:500]
+            for log in logs
         ],
+        "max_log_id": max_log_id,
     }
 
 
@@ -271,8 +371,19 @@ async def rollback_deployment(
         user_agent=user_agent,
     )
 
-    # Execute rollback in background
-    asyncio.create_task(execute_rollback(rollback_deployment.id, deployment_id, db))
+    # Execute rollback in background with a new database session
+    # The background task will create its own session to avoid issues with
+    # the parent request's session being closed
+    async def run_rollback():
+        try:
+            await execute_rollback(rollback_deployment.id, deployment_id)
+        except Exception as e:
+            logger.error(f"Background rollback task failed for deployment {rollback_deployment.id}: {e}")
+        finally:
+            _background_tasks.pop(rollback_deployment.id, None)
+
+    task = asyncio.ensure_future(run_rollback())
+    _background_tasks[rollback_deployment.id] = task
 
     return cast(Deployment, rollback_deployment)
 

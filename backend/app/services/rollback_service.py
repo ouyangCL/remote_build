@@ -4,7 +4,7 @@ from typing import Callable
 
 from sqlalchemy.orm import Session
 
-from app.core.ssh import create_ssh_connection
+from app.core.ssh import SSHLogger, create_ssh_connection
 from app.models.deployment import Deployment, DeploymentStatus, DeploymentStatus
 from app.models.server import Server
 from app.services.log_service import DeploymentLogger
@@ -14,6 +14,26 @@ class RollbackError(Exception):
     """Rollback error."""
 
     pass
+
+
+class _RollbackSSHLoggerAdapter(SSHLogger):
+    """Adapter to connect DeploymentLogger with SSHLogger interface."""
+
+    def __init__(self, deployment_logger: DeploymentLogger):
+        """Initialize adapter.
+
+        Args:
+            deployment_logger: Deployment logger instance
+        """
+        self._logger = deployment_logger
+
+    async def info(self, message: str) -> None:
+        """Log info message."""
+        await self._logger.info(message)
+
+    async def error(self, message: str) -> None:
+        """Log error message."""
+        await self._logger.error(message)
 
 
 class RollbackService:
@@ -110,7 +130,9 @@ class RollbackService:
         await self.logger.info(f"Deploying to server: {server.name} ({server.host})")
 
         try:
-            conn = create_ssh_connection(server)
+            # Create SSH logger adapter
+            ssh_logger = _RollbackSSHLoggerAdapter(self.logger)
+            conn = create_ssh_connection(server, logger=ssh_logger)
 
             with conn:
                 # Upload artifact
@@ -152,27 +174,34 @@ class RollbackService:
 async def execute_rollback(
     target_deployment_id: int,
     source_deployment_id: int,
-    db: Session,
 ) -> None:
     """Execute a rollback (background task).
+
+    This function creates its own database session to avoid issues with
+    the parent request's session being closed after the HTTP response.
 
     Args:
         target_deployment_id: New deployment (rollback) ID
         source_deployment_id: Original deployment ID to rollback to
-        db: Database session
     """
-    target_deployment = (
-        db.query(Deployment).filter(Deployment.id == target_deployment_id).first()
-    )
-    source_deployment = (
-        db.query(Deployment).filter(Deployment.id == source_deployment_id).first()
-    )
+    from app.db.session import SessionLocal
 
-    if not target_deployment or not source_deployment:
-        return
+    db = SessionLocal()
+    try:
+        target_deployment = (
+            db.query(Deployment).filter(Deployment.id == target_deployment_id).first()
+        )
+        source_deployment = (
+            db.query(Deployment).filter(Deployment.id == source_deployment_id).first()
+        )
 
-    service = RollbackService(target_deployment, source_deployment, db)
-    await service.rollback()
+        if not target_deployment or not source_deployment:
+            return
+
+        service = RollbackService(target_deployment, source_deployment, db)
+        await service.rollback()
+    finally:
+        db.close()
 
     # Clean up log buffer after rollback is complete
     from app.services.log_service import remove_log_buffer

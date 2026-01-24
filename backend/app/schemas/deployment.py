@@ -23,6 +23,9 @@ class DeploymentResponse(BaseModel):
     branch: str
     status: str
     deployment_type: DeploymentType
+    progress: int = 0
+    current_step: str | None = None
+    total_steps: int = 5
     commit_hash: str | None = None
     commit_message: str | None = None
     error_message: str | None = None

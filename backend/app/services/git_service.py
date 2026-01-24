@@ -1,11 +1,12 @@
 """Git service for repository operations."""
+import asyncio
 import os
 import shutil
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Generator
+from typing import TYPE_CHECKING, Generator
 
 from git import (
     Actor,
@@ -14,6 +15,9 @@ from git import (
 )
 
 from app.config import settings
+
+if TYPE_CHECKING:
+    from app.services.log_service import DeploymentLogger
 
 # Disable SSL verification for Git (for self-signed certificates)
 os.environ['GIT_SSL_NO_VERIFY'] = '1'
@@ -43,6 +47,7 @@ class GitService:
         git_url: str,
         ssh_key: str | None = None,
         git_token: str | None = None,
+        logger: "DeploymentLogger | None" = None,
     ) -> None:
         """Initialize Git service.
 
@@ -50,10 +55,12 @@ class GitService:
             git_url: Git repository URL (SSH: git@github.com:user/repo.git or HTTPS: https://github.com/user/repo.git)
             ssh_key: Optional SSH private key for SSH private repositories
             git_token: Optional access token for HTTPS private repositories
+            logger: Optional DeploymentLogger for logging operations
         """
         self.original_git_url = git_url
         self.ssh_key = ssh_key
         self.git_token = git_token
+        self.logger = logger
         self.repo: Repo | None = None
         self.repo_path: Path | None = None
         self._ssh_key_file: Path | None = None
@@ -74,6 +81,80 @@ class GitService:
             self.original_git_url.startswith('ssh://') or
             (':' in self.original_git_url and not self.original_git_url.startswith('http'))
         )
+
+    def _log_info(self, message: str) -> None:
+        """Log info message (synchronous wrapper for async logger).
+
+        Args:
+            message: Message to log
+        """
+        if self.logger:
+            try:
+                # Create new event loop if none exists
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_closed():
+                        raise RuntimeError("Loop is closed")
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                # Run async logging in existing loop
+                if loop.is_running():
+                    # If loop is running, schedule the coroutine
+                    asyncio.create_task(self.logger.info(message))
+                else:
+                    # If loop is not running, run the coroutine
+                    loop.run_until_complete(self.logger.info(message))
+            except Exception:
+                # Silently fail if logging fails
+                pass
+
+    def _log_error(self, message: str) -> None:
+        """Log error message (synchronous wrapper for async logger).
+
+        Args:
+            message: Message to log
+        """
+        if self.logger:
+            try:
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_closed():
+                        raise RuntimeError("Loop is closed")
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                if loop.is_running():
+                    asyncio.create_task(self.logger.error(message))
+                else:
+                    loop.run_until_complete(self.logger.error(message))
+            except Exception:
+                pass
+
+    def _log_warning(self, message: str) -> None:
+        """Log warning message (synchronous wrapper for async logger).
+
+        Args:
+            message: Message to log
+        """
+        if self.logger:
+            try:
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_closed():
+                        raise RuntimeError("Loop is closed")
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+
+                if loop.is_running():
+                    asyncio.create_task(self.logger.warning(message))
+                else:
+                    loop.run_until_complete(self.logger.warning(message))
+            except Exception:
+                pass
 
     def _setup_auth(self) -> dict:
         """Setup authentication for Git operations (SSH key or Token).
@@ -111,15 +192,14 @@ class GitService:
         # Create a unique credential helper script
         self._credential_file = credential_dir / f"cred_helper_{id(self)}"
 
-        # Write git credential helper script (not GIT_ASKPASS)
+        # Write git credential helper script
         script_content = f'''#!/bin/bash
 # Git credential helper for token authentication
 if [ "$1" = "get" ]; then
     echo "protocol={parsed.scheme}"
     echo "host={parsed.netloc}"
-    echo "path={parsed.path}"
-    echo "username={self.git_token}"
-    echo "password="
+    echo "username=oauth2"
+    echo "password={self.git_token}"
     echo ""
 elif [ "$1" = "store" ] || [ "$1" = "erase" ]; then
     # Do nothing - we don't store credentials
@@ -129,16 +209,8 @@ fi
         self._credential_file.write_text(script_content)
         self._credential_file.chmod(0o700)
 
-        # Use GIT_ASKPASS with a simpler script that outputs credentials
-        askpass_file = credential_dir / f"askpass_{id(self)}"
-        askpass_content = f'''#!/bin/bash
-echo "{self.git_token}"
-'''
-        askpass_file.write_text(askpass_content)
-        askpass_file.chmod(0o700)
-        self._askpass_file = askpass_file
-
-        env['GIT_ASKPASS'] = str(askpass_file)
+        # Configure Git to use the credential helper
+        env['GIT_ASKPASS'] = str(self._credential_file)
         env['GIT_TERMINAL_PROMPT'] = '0'
 
         return env
@@ -194,11 +266,12 @@ echo "{self.git_token}"
                 pass
             self._askpass_file = None
 
-    def clone(self, target_dir: Path | None = None) -> Path:
+    def clone(self, target_dir: Path | None = None, branch: str | None = None) -> Path:
         """Clone a Git repository.
 
         Args:
             target_dir: Target directory for cloning
+            branch: Optional branch to clone (fetches all branches if None)
 
         Returns:
             Path to cloned repository
@@ -206,15 +279,23 @@ echo "{self.git_token}"
         Raises:
             GitError: If clone operation fails
         """
+        # Log clone start
+        self._log_info("===== 开始克隆 Git 仓库 =====")
+        self._log_info(f"仓库地址: {self.git_url}")
+        self._log_info(f"指定分支: {branch if branch else '默认分支'}")
+
         if target_dir is None:
             # Create a temp directory in work dir
             work_path = Path(settings.work_dir)
             work_path.mkdir(parents=True, exist_ok=True)
             target_dir = work_path / f"repo_{id(self)}"
 
+        self._log_info(f"目标目录: {target_dir}")
+
         # Clean up existing directory if present
         if target_dir.exists():
             shutil.rmtree(target_dir, ignore_errors=True)
+            self._log_info("已清理已存在的目标目录")
 
         try:
             # Setup authentication
@@ -224,15 +305,51 @@ echo "{self.git_token}"
             import git
             git.cmd.Git.GIT_PYTHON_TRACE = 'full'  # Enable full tracing for debugging
 
+            self._log_info("正在克隆仓库...")
+
+            # Clone without --depth to get all remote branches
+            # Use --single-branch only if a specific branch is requested
+            clone_args = ["--no-tags"]
+            if branch:
+                clone_args.extend(["--single-branch", "--branch", branch])
+
             self.repo_path = Path(
                 Repo.clone_from(
                     self.git_url,
                     target_dir,
-                    depth=1,
-                    env=env
+                    env=env,
+                    multi_options=clone_args
                 ).working_dir
             )
             self.repo = Repo(self.repo_path)
+
+            self._log_info("仓库克隆成功")
+
+            # Get current branch and commit info
+            try:
+                current_branch = self.repo.active_branch.name
+                self._log_info(f"当前分支: {current_branch}")
+
+                head_commit = self.repo.head.commit
+                commit_message = head_commit.message.strip()
+                # Truncate long commit messages
+                if len(commit_message) > 100:
+                    commit_message = commit_message[:97] + "..."
+                self._log_info(f"最新提交: {head_commit.hexsha[:7]} - {commit_message}")
+            except Exception as e:
+                self._log_warning(f"无法获取仓库信息: {e}")
+
+            # Fetch all remote branches to ensure they're available for checkout
+            try:
+                self.repo.git.fetch(env=env, all=True, tags=False)
+                self._log_info("已获取所有远程分支")
+            except GitCommandError as e:
+                # If fetch all fails, the initial clone should still work
+                self._log_warning(f"获取远程分支失败（非致命错误）: {e}")
+
+            # Note: Don't clean up credential/ssh files yet - they're needed for subsequent operations
+            # They will be cleaned up in cleanup() or __exit__
+
             return self.repo_path
         except GitCommandError as e:
             # Provide detailed error information
@@ -240,7 +357,7 @@ echo "{self.git_token}"
             stderr = str(e.stderr).lower() if e.stderr else ""
 
             if "authentication" in stderr or "permission" in stderr:
-                error_msg += " - Authentication failed. Please check your SSH key."
+                error_msg += " - Authentication failed. Please check your credentials."
             elif "ssh" in stderr and "publickey" in stderr:
                 error_msg += " - SSH key rejected. Make sure the SSH key is added to your Git account."
             elif "not found" in stderr or "does not exist" in stderr:
@@ -250,12 +367,8 @@ echo "{self.git_token}"
             else:
                 error_msg += f" - {e}"
 
+            self._log_error(f"克隆失败: {error_msg}")
             raise GitError(error_msg) from e
-        finally:
-            # Clean up credential file after clone
-            self._cleanup_credential_file()
-            # Clean up SSH key file after clone
-            self._cleanup_ssh_key()
 
     def checkout_branch(self, branch_name: str) -> None:
         """Checkout a branch.
@@ -269,34 +382,50 @@ echo "{self.git_token}"
         if not self.repo:
             raise GitError("Repository not initialized. Call clone() first.")
 
+        self._log_info(f"切换到分支: {branch_name}")
+
         try:
             # Setup authentication for remote operations
             env = self._setup_auth()
 
-            # For shallow clones, fetch the specific branch directly
-            # Using explicit refspec to fetch only the requested branch
+            # Fetch all remote branches with explicit parameters
+            # Using --all to fetch all remotes and branches
+            self._log_info("拉取最新代码...")
             try:
-                self.repo.git.fetch(
-                    'origin',
-                    f'+refs/heads/{branch_name}:refs/remotes/origin/{branch_name}',
-                    env=env
-                )
-            except GitCommandError as e:
-                # Branch doesn't exist on remote
-                if f"couldn't find remote ref {branch_name}" in str(e).lower() or \
-                   "couldn't find" in str(e).lower():
-                    raise GitError(
-                        f"Branch '{branch_name}' not found in remote repository"
-                    ) from e
-                raise
+                self.repo.git.fetch(env=env, all=True, prune=True, tags=False)
+                self._log_info("已获取所有远程分支")
+            except GitCommandError as fetch_error:
+                # If fetch fails, try without --all
+                try:
+                    self.repo.git.fetch(env=env, origin=branch_name, tags=False)
+                    self._log_info(f"已获取分支 {branch_name}")
+                except GitCommandError:
+                    # If both fail, continue - the branch might already exist
+                    self._log_warning(f"获取远程分支失败（尝试继续）: {fetch_error}")
+
+            # List all available remote branches for debugging
+            remote_refs = [ref.name for ref in self.repo.references]
+            # Log all references for debugging
+            self._log_info(f"所有引用: {remote_refs}")
+
+            available_remote_branches = [
+                name.replace("origin/", "")
+                for name in remote_refs
+                if name.startswith("origin/") and name != "origin/HEAD"
+            ]
 
             # Check if the remote branch now exists
             remote_branch = f"origin/{branch_name}"
-            try:
-                self.repo.refs[f"refs/remotes/{remote_branch}"]
-            except IndexError:
+
+            # Check if remote branch exists
+            if remote_branch not in remote_refs:
+                self._log_error(
+                    f"分支 '{branch_name}' 在远程仓库中不存在。"
+                    f"可用远程分支: {', '.join(available_remote_branches) or '无'}"
+                )
                 raise GitError(
-                    f"Branch '{branch_name}' not found in remote repository"
+                    f"Branch '{branch_name}' not found in remote repository. "
+                    f"Available remote branches: {', '.join(available_remote_branches) or 'none'}"
                 )
 
             # Create local branch tracking remote branch
@@ -305,19 +434,31 @@ echo "{self.git_token}"
                 self.repo.heads[branch_name]
                 # Local branch exists, just checkout
                 self.repo.git.checkout(branch_name)
+                self._log_info(f"已切换到本地分支: {branch_name}")
             except (IndexError, GitCommandError):
                 # Local branch doesn't exist, create new tracking branch
-                self.repo.git.checkout(f"{remote_branch}", b=branch_name)
+                # Use git checkout -b to create and track remote branch
+                self.repo.git.checkout(remote_branch, b=branch_name)
+                self._log_info(f"已创建本地分支 '{branch_name}' 并跟踪远程分支 '{remote_branch}'")
 
-            # Pull latest changes (no-op for shallow clone, but keeps for consistency)
-            self.repo.remotes.origin.pull(env=env)
+            # Pull latest changes
+            try:
+                pull_result = self.repo.remotes.origin.pull(env=env)
+                # Check if there were any updates
+                if pull_result and pull_result[0].flags > 0:
+                    head_commit = self.repo.head.commit
+                    commit_message = head_commit.message.strip()
+                    if len(commit_message) > 100:
+                        commit_message = commit_message[:97] + "..."
+                    self._log_info(f"已更新到: {head_commit.hexsha[:7]} - {commit_message}")
+                else:
+                    self._log_info("已是最新版本")
+            except GitCommandError as pull_error:
+                self._log_warning(f"拉取最新代码时出现警告: {pull_error}")
+
         except GitCommandError as e:
+            self._log_error(f"切换分支失败: {e}")
             raise GitError(f"Failed to checkout branch '{branch_name}': {e}") from e
-        finally:
-            # Clean up credential file
-            self._cleanup_credential_file()
-            # Clean up SSH key file
-            self._cleanup_ssh_key()
 
     def pull_latest(self) -> None:
         """Pull latest changes from remote.
@@ -328,11 +469,30 @@ echo "{self.git_token}"
         if not self.repo:
             raise GitError("Repository not initialized. Call clone() first.")
 
+        self._log_info("拉取最新代码...")
+
         try:
             # Setup authentication for remote operations
             env = self._setup_auth()
-            self.repo.remotes.origin.pull(env=env)
+
+            # Get current commit before pull
+            old_commit = self.repo.head.commit.hexsha[:7]
+
+            pull_result = self.repo.remotes.origin.pull(env=env)
+
+            # Get new commit after pull
+            new_commit = self.repo.head.commit.hexsha[:7]
+
+            if old_commit != new_commit:
+                head_commit = self.repo.head.commit
+                commit_message = head_commit.message.strip()
+                if len(commit_message) > 100:
+                    commit_message = commit_message[:97] + "..."
+                self._log_info(f"已更新到: {new_commit} - {commit_message}")
+            else:
+                self._log_info("已是最新版本")
         except GitCommandError as e:
+            self._log_error(f"拉取失败: {e}")
             raise GitError(f"Failed to pull latest changes: {e}") from e
         finally:
             # Clean up credential file
@@ -377,6 +537,8 @@ echo "{self.git_token}"
         if not self.repo:
             raise GitError("Repository not initialized. Call clone() first.")
 
+        self._log_info("获取分支列表...")
+
         try:
             # Setup authentication for remote operations
             env = self._setup_auth()
@@ -399,6 +561,7 @@ echo "{self.git_token}"
             # Sort branches
             return sorted(branches)
         except GitCommandError as e:
+            self._log_error(f"获取分支列表失败: {e}")
             raise GitError(f"Failed to get branches: {e}") from e
         finally:
             # Clean up credential file
@@ -433,6 +596,7 @@ def git_context(
     branch: str,
     ssh_key: str | None = None,
     git_token: str | None = None,
+    logger: "DeploymentLogger | None" = None,
 ) -> Generator[GitService, None, None]:
     """Context manager for Git operations.
 
@@ -441,11 +605,12 @@ def git_context(
         branch: Branch to checkout
         ssh_key: Optional SSH private key for SSH private repositories
         git_token: Optional access token for HTTPS private repositories
+        logger: Optional DeploymentLogger for logging operations
 
     Yields:
         Git service instance
     """
-    service = GitService(git_url, ssh_key=ssh_key, git_token=git_token)
+    service = GitService(git_url, ssh_key=ssh_key, git_token=git_token, logger=logger)
     try:
         service.clone()
         service.checkout_branch(branch)
@@ -458,6 +623,7 @@ def get_remote_branches(
     git_url: str,
     ssh_key: str | None = None,
     git_token: str | None = None,
+    logger: "DeploymentLogger | None" = None,
 ) -> list[str]:
     """Get list of remote branches without cloning.
 
@@ -465,6 +631,7 @@ def get_remote_branches(
         git_url: Git repository URL (SSH or HTTPS format)
         ssh_key: Optional SSH private key for SSH private repositories
         git_token: Optional access token for HTTPS private repositories
+        logger: Optional DeploymentLogger for logging operations
 
     Returns:
         List of branch names
@@ -472,7 +639,7 @@ def get_remote_branches(
     Raises:
         GitError: If failed to get branches
     """
-    service = GitService(git_url, ssh_key=ssh_key, git_token=git_token)
+    service = GitService(git_url, ssh_key=ssh_key, git_token=git_token, logger=logger)
     try:
         service.clone()
         return service.get_branches()

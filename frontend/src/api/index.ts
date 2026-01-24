@@ -11,7 +11,7 @@ const baseURL = import.meta.env.VITE_API_URL || '/api'
 
 const api: AxiosInstance = axios.create({
   baseURL,
-  timeout: 30000,
+  timeout: 60000, // Increased from 30s to 60s for better stability
 })
 
 // Request interceptor
