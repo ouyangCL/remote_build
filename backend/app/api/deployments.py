@@ -146,6 +146,7 @@ async def get_deployment(
         "project_id": deployment.project_id,
         "branch": deployment.branch,
         "status": deployment.status.value if hasattr(deployment.status, "value") else deployment.status,
+        "deployment_type": deployment.deployment_type.value if hasattr(deployment.deployment_type, "value") else deployment.deployment_type,
         "commit_hash": deployment.commit_hash,
         "commit_message": deployment.commit_message,
         "error_message": deployment.error_message,
