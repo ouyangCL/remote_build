@@ -21,6 +21,13 @@ if TYPE_CHECKING:
     from app.models.user import User
 
 
+class DeploymentType(str, enum.Enum):
+    """Deployment type."""
+
+    FULL = "full"  # Full deployment with clone, build, upload
+    RESTART_ONLY = "restart_only"  # Restart only, no build
+
+
 class DeploymentStatus(str, enum.Enum):
     """Deployment status."""
 
@@ -29,6 +36,7 @@ class DeploymentStatus(str, enum.Enum):
     BUILDING = "building"
     UPLOADING = "uploading"
     DEPLOYING = "deploying"
+    RESTARTING = "restarting"  # For restart_only mode
     SUCCESS = "success"
     FAILED = "failed"
     CANCELLED = "cancelled"
@@ -66,6 +74,9 @@ class Deployment(Base, TimestampMixin):
     )
     environment: Mapped[EnvironmentType] = mapped_column(
         String(20), default=EnvironmentType.DEVELOPMENT, nullable=False, index=True
+    )
+    deployment_type: Mapped[DeploymentType] = mapped_column(
+        String(20), default=DeploymentType.FULL, nullable=False
     )
 
     # Relationships
