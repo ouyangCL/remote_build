@@ -59,8 +59,20 @@ export interface Project {
   project_type: 'frontend' | 'backend' | 'java'
   build_script: string
   deploy_script_path: string
+  upload_path: string
+  restart_script_path: string
+  restart_only_script_path?: string | null
   output_dir: string
   environment: Environment
+  health_check_enabled: boolean
+  health_check_type: 'http' | 'tcp' | 'command'
+  health_check_url?: string | null
+  health_check_port?: number | null
+  health_check_command?: string | null
+  health_check_timeout: number
+  health_check_retries: number
+  health_check_interval: number
+  has_git_credentials?: boolean
   created_at: string
   updated_at: string
 }
