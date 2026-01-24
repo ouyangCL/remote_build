@@ -15,6 +15,10 @@ class ProjectBase(BaseModel):
     build_script: str = Field(..., min_length=1)
     upload_path: str = Field(default="", max_length=255, description="Server-side path for uploading deployment packages")
     restart_script_path: str = Field(default="/opt/restart.sh", max_length=255, description="Server-side script to restart the application")
+    restart_only_script_path: str | None = Field(
+        default=None,
+        description="仅重启部署模式专用的重启脚本路径"
+    )
     output_dir: str = Field(default="dist", max_length=255)
     environment: str = Field(default="development", pattern="^(development|production)$")
 
@@ -47,6 +51,10 @@ class ProjectUpdate(BaseModel):
     build_script: str | None = None
     upload_path: str | None = Field(None, max_length=255, description="Server-side path for uploading deployment packages")
     restart_script_path: str | None = Field(None, max_length=255, description="Server-side script to restart the application")
+    restart_only_script_path: str | None = Field(
+        default=None,
+        description="仅重启部署模式专用的重启脚本路径"
+    )
     output_dir: str | None = Field(None, max_length=255)
     environment: str | None = Field(None, pattern="^(development|production)$")
 
