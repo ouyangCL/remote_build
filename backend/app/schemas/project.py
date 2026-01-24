@@ -20,6 +20,16 @@ class ProjectBase(BaseModel):
         description="仅重启部署模式专用的重启脚本路径"
     )
     output_dir: str = Field(default="dist", max_length=255)
+    # Dependency installation
+    install_script: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Custom dependency installation command (e.g., 'npm ci', 'yarn install', 'pip install -r requirements.txt')"
+    )
+    auto_install: bool = Field(
+        default=True,
+        description="Automatically install dependencies before build"
+    )
     environment: str = Field(default="development", pattern="^(development|production)$")
 
     # Health Check Configuration
@@ -56,6 +66,16 @@ class ProjectUpdate(BaseModel):
         description="仅重启部署模式专用的重启脚本路径"
     )
     output_dir: str | None = Field(None, max_length=255)
+    # Dependency installation
+    install_script: str | None = Field(
+        default=None,
+        max_length=500,
+        description="Custom dependency installation command"
+    )
+    auto_install: bool | None = Field(
+        default=None,
+        description="Automatically install dependencies before build"
+    )
     environment: str | None = Field(None, pattern="^(development|production)$")
 
     # Health Check Configuration
