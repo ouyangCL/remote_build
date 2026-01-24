@@ -62,6 +62,13 @@ class Project(Base, TimestampMixin):
     output_dir: Mapped[str] = mapped_column(
         String(255), nullable=False, default="dist"
     )
+    # Dependency installation configuration
+    install_script: Mapped[str | None] = mapped_column(
+        String(500), nullable=True, default=None
+    )
+    auto_install: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False
+    )
     environment: Mapped[EnvironmentType] = mapped_column(
         String(20), default=EnvironmentType.DEVELOPMENT, nullable=False, index=True
     )
