@@ -22,10 +22,10 @@ if TYPE_CHECKING:
 
 
 class DeploymentType(str, enum.Enum):
-    """Deployment type."""
+    """部署类型枚举"""
 
-    FULL = "full"  # Full deployment with clone, build, upload
-    RESTART_ONLY = "restart_only"  # Restart only, no build
+    FULL = "full"  # 完整部署（包含克隆、构建、上传）
+    RESTART_ONLY = "restart_only"  # 仅重启（不构建）
 
 
 class DeploymentStatus(str, enum.Enum):
@@ -76,7 +76,7 @@ class Deployment(Base, TimestampMixin):
         String(20), default=EnvironmentType.DEVELOPMENT, nullable=False, index=True
     )
     deployment_type: Mapped[DeploymentType] = mapped_column(
-        String(20), default=DeploymentType.FULL, nullable=False
+        String(20), default=DeploymentType.FULL, nullable=False, index=True
     )
 
     # Relationships

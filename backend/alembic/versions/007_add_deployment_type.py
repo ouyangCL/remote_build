@@ -21,8 +21,10 @@ def upgrade() -> None:
     """Add deployment_type column to deployments table."""
     # Add deployment_type column with default value 'full'
     op.add_column('deployments', sa.Column('deployment_type', sa.String(20), nullable=False, server_default='full'))
+    op.create_index('ix_deployments_deployment_type', 'deployments', ['deployment_type'])
 
 
 def downgrade() -> None:
     """Remove deployment_type column from deployments table."""
+    op.drop_index('ix_deployments_deployment_type', table_name='deployments')
     op.drop_column('deployments', 'deployment_type')
