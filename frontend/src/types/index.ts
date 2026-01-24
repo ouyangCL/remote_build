@@ -91,7 +91,8 @@ export interface Deployment {
   id: number
   project_id: number
   branch: string
-  status: 'pending' | 'cloning' | 'building' | 'uploading' | 'deploying' | 'success' | 'failed' | 'cancelled' | 'rollback'
+  status: string
+  deployment_type?: 'full' | 'restart_only'
   commit_hash?: string
   commit_message?: string
   error_message?: string
