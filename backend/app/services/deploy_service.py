@@ -1,5 +1,7 @@
 """Deployment service for orchestrating deployments."""
 import asyncio
+import os
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -8,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.core.ssh import SSHConnection, SSHLogger, create_ssh_connection
 from app.models.deployment import Deployment, DeploymentStatus, DeploymentType
+from app.models.project import ProjectType
 from app.models.server import Server, ServerGroup
 from app.models.user import User
 from app.services.build_service import BuildService, BuildError
@@ -288,6 +291,9 @@ class DeploymentService:
                 build_script=self.deployment.project.build_script,
                 output_dir=self.deployment.project.output_dir,
                 logger=self.logger,
+                project_type=self.deployment.project.project_type,
+                install_script=self.deployment.project.install_script,
+                auto_install=self.deployment.project.auto_install,
             )
 
             # Execute build
@@ -357,28 +363,16 @@ class DeploymentService:
                 upload_path = project.upload_path
                 if not upload_path:
                     raise DeploymentError("项目未配置 upload_path，无法部署")
-                remote_artifact = f"{upload_path}/{artifact_path.name}"
 
-                await self.logger.info(f"上传部署产物到: {remote_artifact}")
-                # Ensure upload directory exists
-                mkdir_command = f"mkdir -p {upload_path}"
-                exit_code, stdout, stderr = conn.execute_command(mkdir_command)
-                if exit_code != 0:
-                    await self.logger.error(f"创建上传目录失败: {stderr}")
-                    raise DeploymentError(f"Failed to create upload directory: {stderr}")
+                # 路径安全验证：不允许部署到根目录
+                if upload_path == "/":
+                    raise DeploymentError("安全限制：不允许部署到根目录 /，请配置具体的上传路径")
 
-                # Upload artifact
-                conn.upload_file(artifact_path, remote_artifact)
-                await self.logger.info(f"部署产物上传完成: {remote_artifact}")
-
-                # 解压zip包到upload_path目录
-                await self.logger.info(f"解压部署产物到: {upload_path}")
-                unzip_command = f"unzip -o {remote_artifact} -d {upload_path}"
-                exit_code, stdout, stderr = conn.execute_command(unzip_command)
-                if exit_code != 0:
-                    await self.logger.error(f"解压失败: {stderr}")
-                    raise DeploymentError(f"Failed to unzip artifact: {stderr}")
-                await self.logger.info("解压完成")
+                # 根据项目类型选择部署策略
+                if project.project_type == ProjectType.FRONTEND:
+                    await self._deploy_frontend_to_server(conn, server, upload_path, artifact_path)
+                else:
+                    await self._deploy_backend_to_server(conn, server, upload_path, artifact_path)
 
                 # Execute restart script
                 if project.restart_script_path:
@@ -426,6 +420,165 @@ class DeploymentService:
 
         except Exception as e:
             raise DeploymentError(f"Failed to deploy to {server.name}: {e}") from e
+
+    async def _deploy_backend_to_server(
+        self,
+        conn: SSHConnection,
+        server: Server,
+        upload_path: str,
+        artifact_path: Path,
+    ) -> None:
+        """Deploy backend project to server (original deployment logic).
+
+        Args:
+            conn: SSH connection
+            server: Target server
+            upload_path: Remote upload path
+            artifact_path: Local artifact path
+        """
+        remote_artifact = f"{upload_path}/{artifact_path.name}"
+
+        await self.logger.info(f"上传部署产物到: {remote_artifact}")
+        # Ensure upload directory exists
+        mkdir_command = f"mkdir -p {upload_path}"
+        exit_code, stdout, stderr = conn.execute_command(mkdir_command)
+        if exit_code != 0:
+            await self.logger.error(f"创建上传目录失败: {stderr}")
+            raise DeploymentError(f"Failed to create upload directory: {stderr}")
+
+        # Upload artifact
+        conn.upload_file(artifact_path, remote_artifact)
+        await self.logger.info(f"部署产物上传完成: {remote_artifact}")
+
+        # 解压zip包到upload_path目录
+        await self.logger.info(f"解压部署产物到: {upload_path}")
+        unzip_command = f"unzip -o {remote_artifact} -d {upload_path}"
+        exit_code, stdout, stderr = conn.execute_command(unzip_command)
+        if exit_code != 0:
+            await self.logger.error(f"解压失败: {stderr}")
+            raise DeploymentError(f"Failed to unzip artifact: {stderr}")
+        await self.logger.info("解压完成")
+
+    async def _deploy_frontend_to_server(
+        self,
+        conn: SSHConnection,
+        server: Server,
+        upload_path: str,
+        artifact_path: Path,
+    ) -> None:
+        """Deploy frontend project to server with backup mechanism.
+
+        部署流程：
+        1. 上传zip到父目录
+        2. 备份现有目录（如果存在）
+        3. 解压到配置路径
+        4. 清理zip文件
+
+        Args:
+            conn: SSH connection
+            server: Target server
+            upload_path: Remote upload path (e.g., /application/web/admin)
+            artifact_path: Local artifact path
+        """
+        # 计算父目录和备份路径
+        parent_dir = os.path.dirname(upload_path)
+        target_dir_name = os.path.basename(upload_path)
+        timestamp = datetime.now().strftime("%m%d-%H%M%S")
+        backup_dir_name = f"{target_dir_name}-{timestamp}"
+        backup_path = os.path.join(parent_dir, backup_dir_name)
+
+        await self.logger.info(f"前端项目部署模式")
+        await self.logger.info(f"目标路径: {upload_path}")
+        await self.logger.info(f"父目录: {parent_dir}")
+        await self.logger.info(f"备份路径: {backup_path}")
+
+        # 验证父目录不为空（防止upload_path是根目录）
+        if not parent_dir or parent_dir == upload_path:
+            raise DeploymentError(
+                f"无效的配置路径: {upload_path}。前端项目需要配置具体的子目录路径，例如 /application/web/admin"
+            )
+
+        # 1. 创建父目录
+        await self.logger.info(f"创建父目录: {parent_dir}")
+        mkdir_command = f"mkdir -p {parent_dir}"
+        exit_code, stdout, stderr = conn.execute_command(mkdir_command)
+        if exit_code != 0:
+            await self.logger.error(f"创建父目录失败: {stderr}")
+            raise DeploymentError(f"Failed to create parent directory: {stderr}")
+
+        # 2. 上传zip到父目录
+        remote_artifact = f"{parent_dir}/{artifact_path.name}"
+        await self.logger.info(f"上传部署产物到父目录: {remote_artifact}")
+        conn.upload_file(artifact_path, remote_artifact)
+        await self.logger.info("部署产物上传完成")
+
+        # 3. 备份现有目录（如果存在）
+        backup_command = f"""if [ -d "{upload_path}" ]; then mv "{upload_path}" "{backup_path}"; fi"""
+        await self.logger.info(f"检查并备份现有目录: {upload_path}")
+
+        if settings.deployment_log_verbosity == "detailed":
+            await self.logger.info(f"执行备份命令: {backup_command}")
+
+        exit_code, stdout, stderr = conn.execute_command(backup_command)
+        if exit_code != 0:
+            await self.logger.error(f"备份失败: {stderr}")
+            # 清理已上传的zip文件
+            await self.logger.warning("备份失败，清理已上传的文件")
+            cleanup_command = f"rm -f {remote_artifact}"
+            conn.execute_command(cleanup_command)
+            raise DeploymentError(f"备份失败，已中止部署: {stderr}")
+
+        # 检查是否真的执行了备份（通过检查备份目录是否存在）
+        check_backup_command = f"[ -d \"{backup_path}\" ] && echo \"EXISTS\" || echo \"NOT_EXISTS\""
+        exit_code, stdout, stderr = conn.execute_command(check_backup_command)
+        backup_exists = stdout.strip() == "EXISTS"
+
+        if backup_exists:
+            await self.logger.info(f"已备份现有目录到: {backup_path}")
+        else:
+            await self.logger.info("未发现现有目录，跳过备份")
+
+        # 4. 解压到配置路径
+        await self.logger.info(f"解压部署产物到: {upload_path}")
+        unzip_command = f"unzip -o {remote_artifact} -d {upload_path}"
+
+        if settings.deployment_log_verbosity == "detailed":
+            await self.logger.info(f"执行解压命令: {unzip_command}")
+
+        exit_code, stdout, stderr = conn.execute_command(unzip_command)
+        if exit_code != 0:
+            await self.logger.error(f"解压失败: {stderr}")
+
+            # 尝试恢复备份
+            if backup_exists:
+                await self.logger.warning(f"解压失败，尝试恢复备份: {backup_path} -> {upload_path}")
+                restore_command = f"mv \"{backup_path}\" \"{upload_path}\""
+                exit_code_restore, stdout_restore, stderr_restore = conn.execute_command(restore_command)
+                if exit_code_restore == 0:
+                    await self.logger.info("备份恢复成功")
+                else:
+                    await self.logger.error(f"备份恢复失败: {stderr_restore}")
+                    await self.logger.error(f"手动恢复命令: mv \"{backup_path}\" \"{upload_path}\"")
+            else:
+                await self.logger.info("无备份可恢复")
+
+            # 清理zip文件
+            await self.logger.warning("清理已上传的zip文件")
+            cleanup_command = f"rm -f {remote_artifact}"
+            conn.execute_command(cleanup_command)
+
+            raise DeploymentError(f"解压失败，已中止部署: {stderr}")
+
+        await self.logger.info("解压完成")
+
+        # 5. 清理zip文件
+        await self.logger.info(f"清理zip文件: {remote_artifact}")
+        cleanup_command = f"rm -f {remote_artifact}"
+        exit_code, stdout, stderr = conn.execute_command(cleanup_command)
+        if exit_code != 0:
+            await self.logger.warning(f"清理zip文件失败（不影响部署）: {stderr}")
+        else:
+            await self.logger.info("zip文件清理完成")
 
     async def _restart_servers(self) -> None:
         """Restart services on all servers.
