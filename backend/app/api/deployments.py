@@ -97,6 +97,7 @@ async def create_deployment(
         created_by=current_user.id,
         server_groups=server_groups,
         environment=project.environment,
+        deployment_type=deployment_data.deployment_type,
     )
     db.add(deployment)
     db.commit()
