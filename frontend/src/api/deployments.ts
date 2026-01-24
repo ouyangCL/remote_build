@@ -9,6 +9,7 @@ export default {
     project_id: number
     branch: string
     server_group_ids: number[]
+    deployment_type?: 'full' | 'restart_only'
   }): Promise<Deployment> => api.post('/deployments', data),
 
   get: (id: number): Promise<Deployment> => api.get(`/deployments/${id}`),
