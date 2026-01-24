@@ -42,7 +42,29 @@
                 placeholder="请输入分支名称（如：main、develop）"
                 style="width: 100%"
                 clearable
+                :disabled="form.deployment_type === 'restart_only'"
               />
+              <div v-if="form.deployment_type === 'restart_only'" class="form-tip">
+                <el-icon color="#e6a23c"><Warning /></el-icon>
+                <span>仅重启模式下分支信息仅用于记录，不进行代码克隆</span>
+              </div>
+            </el-form-item>
+
+            <el-form-item label="部署模式">
+              <el-radio-group v-model="form.deployment_type">
+                <el-radio label="full">
+                  <div class="radio-option">
+                    <span class="radio-label">完整部署</span>
+                    <span class="radio-desc">克隆代码 → 构建 → 上传 → 重启</span>
+                  </div>
+                </el-radio>
+                <el-radio label="restart_only">
+                  <div class="radio-option">
+                    <span class="radio-label">仅重启</span>
+                    <span class="radio-desc">跳过构建，直接执行重启脚本</span>
+                  </div>
+                </el-radio>
+              </el-radio-group>
             </el-form-item>
 
             <el-form-item label="服务器组">
@@ -141,7 +163,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onUnmounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { InfoFilled } from '@element-plus/icons-vue'
+import { InfoFilled, Warning } from '@element-plus/icons-vue'
 import { projects as projectsApi, servers as serversApi, deployments as deploymentsApi } from '@/api'
 import { ENVIRONMENT_DISPLAY } from '@/types'
 import type { Project, ServerGroup, DeploymentLog, Environment } from '@/types'
@@ -156,10 +178,12 @@ const form = reactive({
   project_id: null as number | null,
   branch: '',
   server_group_ids: [] as number[],
+  deployment_type: 'full' as 'full' | 'restart_only',
 })
 
 const canDeploy = computed(
-  () => form.project_id && form.branch && form.server_group_ids.length > 0
+  () => form.project_id && form.server_group_ids.length > 0 &&
+       (form.deployment_type === 'full' ? form.branch : true)
 )
 
 const selectedProject = computed(() =>
@@ -227,6 +251,7 @@ async function handleDeploy() {
       project_id: form.project_id!,
       branch: form.branch,
       server_group_ids: form.server_group_ids,
+      deployment_type: form.deployment_type,
     })
 
     ElMessage.success('部署已启动')
@@ -289,6 +314,21 @@ onUnmounted(() => {
   margin-top: 5px;
   font-size: 12px;
   color: #606266;
+}
+
+.radio-option {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.radio-label {
+  font-weight: 500;
+}
+
+.radio-desc {
+  font-size: 12px;
+  color: #909399;
 }
 
 .logs-container {

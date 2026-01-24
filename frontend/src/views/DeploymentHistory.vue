@@ -11,6 +11,13 @@
       <el-table :data="deployments" v-loading="loading">
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="project.name" label="项目" />
+        <el-table-column label="部署类型" width="120">
+          <template #default="{ row }">
+            <el-tag :type="row.deployment_type === 'full' ? 'primary' : 'warning'" size="small">
+              {{ row.deployment_type === 'full' ? '完整部署' : '仅重启' }}
+            </el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="branch" label="分支" />
         <el-table-column label="状态" width="120">
           <template #default="{ row }">
@@ -60,6 +67,11 @@
           </el-descriptions-item>
           <el-descriptions-item label="项目">
             {{ currentDeployment.project?.name }}
+          </el-descriptions-item>
+          <el-descriptions-item label="部署类型">
+            <el-tag :type="currentDeployment.deployment_type === 'full' ? 'primary' : 'warning'" size="small">
+              {{ currentDeployment.deployment_type === 'full' ? '完整部署' : '仅重启' }}
+            </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="分支">
             {{ currentDeployment.branch }}
@@ -148,6 +160,7 @@ function getStatusType(status: string) {
     pending: 'warning',
     building: 'primary',
     deploying: 'primary',
+    restarting: 'warning',
   }
   return types[status] || ''
 }
@@ -160,6 +173,7 @@ function getStatusLabel(status: string) {
     pending: '等待中',
     building: '构建中',
     deploying: '部署中',
+    restarting: '重启中',
   }
   return labels[status] || status
 }
