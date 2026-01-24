@@ -382,26 +382,15 @@ class DeploymentService:
 
                 # Execute restart script
                 if project.restart_script_path:
-                    script_path = project.restart_script_path
+                    # Get script execution info
+                    exec_info = get_script_execution_info(project.restart_script_path)
 
-                    # 判断是否为绝对路径
-                    is_absolute_path = script_path.startswith('/')
-
-                    # 如果是相对路径且不以 ./ 开头，添加 ./ 前缀
-                    if not is_absolute_path and not script_path.startswith('./'):
-                        script_path = f'./{script_path}'
-
-                    # Check if it's an inline command (contains shell operators) or a file path
-                    is_inline_command = any(char in script_path for char in ['&', '|', ';', '$', '`', '(', ')', '\n', '>'])
-
-                    if is_inline_command:
-                        command = f"cd {upload_path} && {script_path}"
-                    else:
-                        command = f"cd {upload_path} && bash {script_path}"
+                    await self.logger.info(f"工作目录: {exec_info['working_dir']}")
+                    await self.logger.info(f"执行脚本: {exec_info['script_name']}")
 
                     # minimal 模式下不 streaming 输出
                     if settings.deployment_log_verbosity == "minimal":
-                        exit_code, stdout, stderr = conn.execute_command(command)
+                        exit_code, stdout, stderr = conn.execute_command(exec_info['command'])
                         if exit_code != 0:
                             # 失败时显示完整输出
                             await self.logger.error(f"重启脚本执行失败 (退出码: {exit_code})")
@@ -412,13 +401,10 @@ class DeploymentService:
                             await self.logger.info("重启脚本执行成功")
                     else:
                         # 详细模式：streaming 输出
-                        script_name = Path(script_path).name
-                        await self.logger.info(f"准备执行重启脚本: {script_name}")
-                        await self.logger.info(f"工作目录: {upload_path}")
-                        await self.logger.info(f"执行命令: {command}")
+                        await self.logger.info(f"执行命令: {exec_info['command']}")
 
                         exit_code, stdout, stderr = conn.execute_command_streaming(
-                            command,
+                            exec_info['command'],
                             on_stdout=lambda line: asyncio.create_task(
                                 self.logger.info(f"[stdout] {line}")
                             ),
