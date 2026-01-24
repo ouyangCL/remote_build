@@ -14,6 +14,7 @@ from app.services.build_service import BuildService, BuildError
 from app.services.git_service import GitError, GitService, git_context
 from app.services.health_check_service import HealthCheckError, perform_health_check
 from app.services.log_service import DeploymentLogger, LogLevel
+from app.utils.script_utils import get_script_execution_info
 
 
 class DeploymentConcurrencyManager:
@@ -484,35 +485,37 @@ class DeploymentService:
         """
         await self.logger.info(f"Restarting on server: {server.name} ({server.host})")
 
-        # Check if project has restart script configured
-        if not self.deployment.project.deploy_script_path:
+        # Check if project has restart-only script configured
+        if not self.deployment.project.restart_only_script_path:
             raise DeploymentError(
-                f"Project {self.deployment.project.name} has no deploy_script_path configured"
+                f"项目 {self.deployment.project.name} 未配置仅重启脚本路径，无法执行仅重启部署"
             )
 
         try:
+            # Get script execution info
+            exec_info = get_script_execution_info(
+                self.deployment.project.restart_only_script_path
+            )
+
+            await self.logger.info(f"工作目录: {exec_info['working_dir']}")
+            await self.logger.info(f"执行脚本: {exec_info['script_name']}")
+
             conn = create_ssh_connection(server)
 
             with conn:
-                # Execute restart script
-                await self.logger.info(
-                    f"Executing restart script: {self.deployment.project.deploy_script_path}"
-                )
-                exit_code, stdout, stderr = conn.execute_command(
-                    f"bash {self.deployment.project.deploy_script_path}"
-                )
+                await self.logger.info(f"执行命令: {exec_info['command']}")
+                exit_code, stdout, stderr = conn.execute_command(exec_info['command'])
 
                 if exit_code != 0:
-                    raise DeploymentError(f"Restart script failed: {stderr}")
+                    raise DeploymentError(f"重启脚本执行失败: {stderr}")
 
-                await self.logger.info("Restart script executed successfully")
-
-                await self.logger.info(f"Successfully restarted on {server.name}")
+                await self.logger.info("重启脚本执行成功")
+                await self.logger.info(f"成功重启 {server.name}")
 
         except DeploymentError:
             raise
         except Exception as e:
-            raise DeploymentError(f"Failed to restart on {server.name}: {e}") from e
+            raise DeploymentError(f"重启失败 {server.name}: {e}") from e
 
     async def _perform_health_checks(self) -> None:
         """Perform health checks on all deployed servers.
