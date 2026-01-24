@@ -53,3 +53,27 @@ def test_get_script_execution_info_path_with_spaces():
     assert info["working_dir"] == "/app/my dir"
     assert info["command"] == 'cd "/app/my dir" && bash "./script.sh"'
     assert info["script_name"] == "script.sh"
+
+
+def test_get_script_execution_info_dangerous_chars():
+    """测试包含危险字符的路径输入"""
+    with pytest.raises(ValueError, match="contains potentially dangerous characters"):
+        get_script_execution_info("script.sh; rm -rf /")
+
+    with pytest.raises(ValueError, match="contains potentially dangerous characters"):
+        get_script_execution_info("script.sh|cat /etc/passwd")
+
+    with pytest.raises(ValueError, match="contains potentially dangerous characters"):
+        get_script_execution_info("script.sh&malicious")
+
+    with pytest.raises(ValueError, match="contains potentially dangerous characters"):
+        get_script_execution_info("script.sh`whoami`")
+
+    with pytest.raises(ValueError, match="contains potentially dangerous characters"):
+        get_script_execution_info("script.sh$(echo hack)")
+
+    with pytest.raises(ValueError, match="contains potentially dangerous characters"):
+        get_script_execution_info("/path/to/script\ninject")
+
+    with pytest.raises(ValueError, match="contains potentially dangerous characters"):
+        get_script_execution_info("/path/to/script\tinject")
