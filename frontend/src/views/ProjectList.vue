@@ -58,12 +58,14 @@
         <el-form-item label="认证方式">
           <el-radio-group v-model="authMethod" @change="handleAuthMethodChange">
             <el-radio value="token">Git Token</el-radio>
+            <el-radio value="password">用户名/密码</el-radio>
             <el-radio value="ssh">SSH Key</el-radio>
             <el-radio value="none">无需认证</el-radio>
           </el-radio-group>
         </el-form-item>
 
-        <el-form-item label="Git Token" v-if="authMethod === 'token'">
+        <!-- Git Token 认证 -->
+        <el-form-item label="Git Token" v-if="authMethod === 'token'" prop="git_token">
           <el-input
             v-model="form.git_token"
             type="password"
@@ -72,11 +74,34 @@
           />
           <div class="form-tip">
             <el-icon color="#909399"><InfoFilled /></el-icon>
-            <span>用于访问 HTTP(S) 私有仓库</span>
+            <span>用于 GitHub/GitLab/Gitea 等平台的 OAuth2 认证</span>
           </div>
         </el-form-item>
 
-        <el-form-item label="SSH Key" v-if="authMethod === 'ssh'">
+        <!-- 用户名/密码认证 -->
+        <template v-if="authMethod === 'password'">
+          <el-form-item label="用户名" prop="git_username">
+            <el-input
+              v-model="form.git_username"
+              placeholder="输入用户名"
+            />
+          </el-form-item>
+          <el-form-item label="密码" prop="git_password">
+            <el-input
+              v-model="form.git_password"
+              type="password"
+              placeholder="输入密码"
+              show-password
+            />
+            <div class="form-tip">
+              <el-icon color="#909399"><InfoFilled /></el-icon>
+              <span>用于私有 Git 服务器的基本认证</span>
+            </div>
+          </el-form-item>
+        </template>
+
+        <!-- SSH Key 认证 -->
+        <el-form-item label="SSH Key" v-if="authMethod === 'ssh'" prop="git_ssh_key">
           <el-input
             v-model="form.git_ssh_key"
             type="textarea"
@@ -91,6 +116,7 @@
           </div>
         </el-form-item>
 
+        <!-- 无需认证提示 -->
         <el-form-item v-if="authMethod === 'none'">
           <div class="form-tip">
             <el-icon color="#E6A23C"><Warning /></el-icon>
@@ -138,6 +164,23 @@
         <el-form-item label="重启脚本" prop="restart_script_path">
           <el-input v-model="form.restart_script_path" placeholder="/application/back/charge-back/restartFromTemp.sh" />
         </el-form-item>
+
+        <el-form-item label="仅重启脚本路径" prop="restart_only_script_path">
+          <el-input
+            v-model="form.restart_only_script_path"
+            placeholder="例如: /application/back/charge-back/restartFromTemp.sh"
+            clearable
+          >
+            <template #prepend>
+              <el-tooltip content="仅重启部署模式专用的重启脚本路径，不配置则无法使用仅重启部署">
+                <el-icon><QuestionFilled /></el-icon>
+              </el-tooltip>
+            </template>
+          </el-input>
+          <div class="form-tip">
+            执行时会自动 cd 到脚本所在目录后再执行脚本
+          </div>
+        </el-form-item>
       </el-form>
 
       <template #footer>
@@ -153,7 +196,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Edit, Delete, Warning, InfoFilled } from '@element-plus/icons-vue'
+import { Plus, Edit, Delete, Warning, InfoFilled, QuestionFilled } from '@element-plus/icons-vue'
 import { projects as projectsApi } from '@/api'
 import { ENVIRONMENT_DISPLAY } from '@/types'
 import type { Project, Environment } from '@/types'
@@ -166,13 +209,15 @@ const submitting = ref(false)
 const formRef = ref()
 const currentProject = ref<Project | null>(null)
 
-const authMethod = ref<'token' | 'ssh' | 'none'>('none')
+const authMethod = ref<'token' | 'password' | 'ssh' | 'none'>('none')
 
 const form = reactive({
   name: '',
   description: '',
   git_url: '',
   git_token: '',
+  git_username: '',
+  git_password: '',
   git_ssh_key: '',
   project_type: 'frontend',
   environment: 'development' as Environment,
@@ -180,6 +225,7 @@ const form = reactive({
   output_dir: 'dist',
   upload_path: '',
   restart_script_path: '/application/back/charge-back/restartFromTemp.sh',
+  restart_only_script_path: '',
 })
 
 const rules = {
@@ -225,14 +271,23 @@ const PROJECT_TEMPLATES: Record<string, { build_script: string; output_dir: stri
 }
 
 // 认证方式切换处理
-function handleAuthMethodChange(method: 'token' | 'ssh' | 'none') {
+function handleAuthMethodChange(method: 'token' | 'password' | 'ssh' | 'none') {
   // 清空其他认证方式的字段
   if (method === 'token') {
+    form.git_username = ''
+    form.git_password = ''
+    form.git_ssh_key = ''
+  } else if (method === 'password') {
+    form.git_token = ''
     form.git_ssh_key = ''
   } else if (method === 'ssh') {
     form.git_token = ''
+    form.git_username = ''
+    form.git_password = ''
   } else {
     form.git_token = ''
+    form.git_username = ''
+    form.git_password = ''
     form.git_ssh_key = ''
   }
 }
@@ -276,6 +331,8 @@ function handleCreate() {
     description: '',
     git_url: '',
     git_token: '',
+    git_username: '',
+    git_password: '',
     git_ssh_key: '',
     project_type: 'frontend',
     environment: 'development' as Environment,
@@ -283,6 +340,7 @@ function handleCreate() {
     output_dir: 'dist',
     upload_path: '',
     restart_script_path: '/application/back/charge-back/restartFromTemp.sh',
+    restart_only_script_path: '',
   })
   dialogVisible.value = true
 }
@@ -295,6 +353,8 @@ function handleEdit(project: Project) {
   // 自动检测认证方式
   if (form.git_ssh_key) {
     authMethod.value = 'ssh'
+  } else if (form.git_username && form.git_password) {
+    authMethod.value = 'password'
   } else if (form.git_token) {
     authMethod.value = 'token'
   } else {
