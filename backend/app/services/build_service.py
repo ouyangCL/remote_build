@@ -52,6 +52,9 @@ class BuildService:
         output_dir: str = "dist",
         on_output: Callable[[str], None] | None = None,
         logger: "DeploymentLogger | None" = None,
+        project_type: str = "frontend",
+        install_script: str | None = None,
+        auto_install: bool = True,
     ) -> None:
         """Initialize build service.
 
@@ -61,12 +64,18 @@ class BuildService:
             output_dir: Output directory relative to source_dir
             on_output: Callback for build output (deprecated, use logger instead)
             logger: DeploymentLogger for structured logging
+            project_type: Project type (frontend/backend/java) for default install commands
+            install_script: Custom dependency installation command
+            auto_install: Whether to automatically install dependencies
         """
         self.source_dir = Path(source_dir)
         self.build_script = build_script
         self.output_dir = output_dir
         self.on_output = on_output or (lambda x: None)
         self.logger = logger
+        self.project_type = project_type
+        self.install_script = install_script
+        self.auto_install = auto_install
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -160,6 +169,104 @@ class BuildService:
             except Exception:
                 pass
 
+    def _get_install_command(self) -> str | None:
+        """Get the dependency installation command.
+
+        Returns:
+            Install command string or None if no installation needed
+        """
+        # If auto_install is disabled, return None
+        if not self.auto_install:
+            return None
+
+        # If custom install_script is provided, use it
+        if self.install_script:
+            return self.install_script
+
+        # Otherwise, use default based on project type
+        default_commands = {
+            "frontend": "npm install",
+            "java": "mvn dependency:resolve",
+            "backend": None,  # No default for backend
+        }
+
+        return default_commands.get(self.project_type)
+
+    def _install_dependencies(self) -> int:
+        """Install project dependencies before build.
+
+        Returns:
+            Exit code (0 for success, non-zero for failure)
+        """
+        install_cmd = self._get_install_command()
+
+        if not install_cmd:
+            self._log_info("跳过依赖安装（未配置或已禁用）")
+            return 0
+
+        self._log_info("=" * 50)
+        self._log_info("开始安装依赖")
+        if settings.deployment_log_verbosity == "detailed":
+            self._log_info(f"项目类型: {self.project_type}")
+            self._log_info(f"安装命令: {install_cmd}")
+        self._log_info("=" * 50)
+
+        import subprocess
+
+        # Parse install command
+        parts = install_cmd.split()
+        command = parts[0]
+        args = parts[1:] if len(parts) > 1 else []
+
+        try:
+            process = subprocess.Popen(
+                [command] + args,
+                cwd=self.source_dir,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+
+            if settings.deployment_log_verbosity == "minimal":
+                # Simple mode: collect output
+                stdout, _ = process.communicate()
+
+                if process.returncode != 0:
+                    self._log_error("依赖安装失败，输出:")
+                    for line in stdout.splitlines():
+                        self._log_error(f"  {line}")
+                    return process.returncode
+                else:
+                    self._log_info("依赖安装完成")
+            else:
+                # Detailed mode: stream output
+                self._log_info("安装输出:")
+
+                for line in process.stdout or []:
+                    line = line.rstrip()
+                    if line:
+                        self._log_info(f"  {line}")
+
+                process.wait()
+
+                if process.returncode != 0:
+                    self._log_error(f"依赖安装失败，退出码: {process.returncode}")
+                    return process.returncode
+
+                self._log_info("=" * 50)
+                self._log_info("依赖安装成功")
+                self._log_info("=" * 50)
+
+            return 0
+
+        except FileNotFoundError:
+            self._log_error(f"命令未找到: {command}")
+            self._log_error(f"请确保 {command} 已安装并在 PATH 中")
+            return 1
+        except Exception as e:
+            self._log_error(f"依赖安装时出错: {e}")
+            return 1
+
     def build(self) -> BuildResult:
         """Execute build process.
 
@@ -174,6 +281,13 @@ class BuildService:
             self._log_info("=" * 50)
 
         self._log_info("开始构建过程")
+
+        # Install dependencies if needed
+        if self.auto_install or self.install_script:
+            install_exit_code = self._install_dependencies()
+            if install_exit_code != 0:
+                self._log_warning(f"依赖安装失败（退出码: {install_exit_code}），将继续尝试构建")
+                # Continue anyway - user might have pre-installed dependencies
 
         if settings.deployment_log_verbosity == "detailed":
             self._log_info(f"源代码目录: {self.source_dir}")
