@@ -40,26 +40,37 @@ class GitError(Exception):
 
 
 class GitService:
-    """Service for Git operations with SSH key or Token authentication."""
+    """Service for Git operations with multiple authentication methods."""
 
     def __init__(
         self,
         git_url: str,
         ssh_key: str | None = None,
         git_token: str | None = None,
+        git_username: str | None = None,
+        git_password: str | None = None,
         logger: "DeploymentLogger | None" = None,
     ) -> None:
         """Initialize Git service.
 
+        Supports three authentication methods:
+        1. SSH key (ssh_key): For SSH-based authentication
+        2. OAuth2 token (git_token): For GitHub, GitLab, Gitea, etc.
+        3. Basic auth (git_username + git_password): For private Git servers
+
         Args:
             git_url: Git repository URL (SSH: git@github.com:user/repo.git or HTTPS: https://github.com/user/repo.git)
             ssh_key: Optional SSH private key for SSH private repositories
-            git_token: Optional access token for HTTPS private repositories
+            git_token: Optional OAuth2 access token for HTTPS private repositories
+            git_username: Optional username for basic authentication
+            git_password: Optional password for basic authentication
             logger: Optional DeploymentLogger for logging operations
         """
         self.original_git_url = git_url
         self.ssh_key = ssh_key
         self.git_token = git_token
+        self.git_username = git_username
+        self.git_password = git_password
         self.logger = logger
         self.repo: Repo | None = None
         self.repo_path: Path | None = None
@@ -67,8 +78,65 @@ class GitService:
         self._credential_file: Path | None = None
         self._askpass_file: Path | None = None
 
-        # For HTTPS with token, don't embed in URL - use credential helper instead
-        self.git_url = git_url
+        # For HTTPS URLs with token, embed token in URL for private Git servers
+        # This is more reliable than credential helpers for some Git servers
+        self.git_url = self._prepare_git_url()
+
+    def _prepare_git_url(self) -> str:
+        """Prepare Git URL with embedded credentials for authentication.
+
+        For private Git servers with token, embed the token directly in the URL.
+        This is more reliable than credential helpers.
+
+        Returns:
+            Prepared Git URL
+        """
+        from urllib.parse import urlparse, urlunparse
+
+        # Only modify HTTPS URLs
+        if not self.original_git_url.startswith('http'):
+            return self.original_git_url
+
+        # For SSH URLs, don't modify (inline check)
+        if (self.original_git_url.startswith('git@') or
+            self.original_git_url.startswith('ssh://') or
+            (':' in self.original_git_url and not self.original_git_url.startswith('http'))):
+            return self.original_git_url
+
+        parsed = urlparse(self.original_git_url)
+        host = parsed.netloc.lower()
+
+        # Check if this is a public platform that needs OAuth2-style authentication
+        is_public_platform = any(domain in host for domain in [
+            'github.com', 'gitlab.com', 'gitea.com', 'bitbucket.org',
+            'git.github.com', 'gitlab.io'
+        ])
+
+        # If using token for private Git server, embed in URL
+        if self.git_token and not is_public_platform:
+            # For private servers:
+            # - If username is provided, use username:password or username:token
+            # - If only token is provided, use :token (empty username, common for Git servers)
+            if self.git_username:
+                username = self.git_username
+                password = self.git_password if self.git_password else self.git_token
+            else:
+                # Use empty username with token (common Git server authentication)
+                username = ""
+                password = self.git_token
+
+            # Rebuild URL with embedded credentials
+            new_netloc = f"{username}:{password}@{parsed.netloc}"
+            return urlunparse((
+                parsed.scheme,
+                new_netloc,
+                parsed.path,
+                parsed.params,
+                parsed.query,
+                parsed.fragment
+            ))
+
+        return self.original_git_url
 
     def _is_ssh_url(self) -> bool:
         """Check if the URL is an SSH URL.
@@ -81,6 +149,48 @@ class GitService:
             self.original_git_url.startswith('ssh://') or
             (':' in self.original_git_url and not self.original_git_url.startswith('http'))
         )
+
+    def _get_safe_url(self, url: str | None = None) -> str:
+        """Get a URL with sensitive information (tokens, passwords) hidden.
+
+        Args:
+            url: URL to sanitize (uses self.git_url if None)
+
+        Returns:
+            Sanitized URL with credentials hidden
+        """
+        if url is None:
+            url = self.git_url
+
+        if not url:
+            return url
+
+        from urllib.parse import urlparse, urlunparse
+
+        try:
+            parsed = urlparse(url)
+
+            # If URL has credentials embedded, hide them
+            if '@' in parsed.netloc:
+                # Extract host without credentials
+                host_with_creds = parsed.netloc
+                host_only = host_with_creds.split('@')[-1]
+
+                # Rebuild URL without credentials
+                safe_url = urlunparse((
+                    parsed.scheme,
+                    host_only,
+                    parsed.path,
+                    parsed.params,
+                    parsed.query,
+                    parsed.fragment
+                ))
+                return safe_url
+
+            return url
+        except Exception:
+            # If parsing fails, return original URL
+            return url
 
     def _log_info(self, message: str) -> None:
         """Log info message (synchronous wrapper for async logger).
@@ -164,18 +274,26 @@ class GitService:
         """
         env = {'GIT_SSL_NO_VERIFY': '1'}
 
-        # For HTTPS with token, setup credential helper
+        # Priority 1: SSH key authentication
+        if self.ssh_key and self._is_ssh_url():
+            return self._setup_ssh_key(env)
+
+        # Priority 2: Basic authentication (username + password)
+        if self.git_username and self.git_password and not self._is_ssh_url():
+            return self._setup_basic_auth(env)
+
+        # Priority 3: OAuth2 token authentication
         if self.git_token and not self._is_ssh_url():
             return self._setup_token_credential(env)
-
-        # For SSH URLs, setup SSH key
-        if self._is_ssh_url():
-            return self._setup_ssh_key(env)
 
         return env
 
     def _setup_token_credential(self, env: dict) -> dict:
         """Setup Git credential helper for token authentication.
+
+        This supports both:
+        1. OAuth2 tokens (GitHub/GitLab/Gitea) - use username "oauth2"
+        2. Private Git servers - use username as the actual username, token as password
 
         Args:
             env: Base environment variables
@@ -192,14 +310,75 @@ class GitService:
         # Create a unique credential helper script
         self._credential_file = credential_dir / f"cred_helper_{id(self)}"
 
+        # For token-based authentication:
+        # - For public platforms (GitHub, GitLab, etc): use username "oauth2" or "git"
+        # - For private Git servers: leave username empty or use provided username
+        # Try to detect if it's a known public platform
+        host = parsed.netloc.lower()
+        if any(domain in host for domain in ['github.com', 'gitlab.com', 'gitea.com', 'bitbucket.org']):
+            # Public platform - use oauth2 username
+            username = "oauth2"
+        else:
+            # Private server - use empty username (many private Git servers expect this)
+            username = ""
+
+        password = self.git_token
+
         # Write git credential helper script
         script_content = f'''#!/bin/bash
 # Git credential helper for token authentication
 if [ "$1" = "get" ]; then
     echo "protocol={parsed.scheme}"
     echo "host={parsed.netloc}"
-    echo "username=oauth2"
-    echo "password={self.git_token}"
+    echo "username={username}"
+    echo "password={password}"
+    echo ""
+elif [ "$1" = "store" ] || [ "$1" = "erase" ]; then
+    # Do nothing - we don't store credentials
+    echo ""
+fi
+'''
+        self._credential_file.write_text(script_content)
+        self._credential_file.chmod(0o700)
+
+        # Configure Git to use the credential helper
+        env['GIT_ASKPASS'] = str(self._credential_file)
+        env['GIT_TERMINAL_PROMPT'] = '0'
+
+        return env
+
+    def _setup_basic_auth(self, env: dict) -> dict:
+        """Setup Git credential helper for basic authentication (username + password).
+
+        This is used for private Git servers that require username/password authentication.
+
+        Args:
+            env: Base environment variables
+
+        Returns:
+            Environment variables with credential helper configured
+        """
+        from urllib.parse import urlparse
+
+        parsed = urlparse(self.git_url)
+        credential_dir = Path(tempfile.gettempdir()) / "devops_git_credentials"
+        credential_dir.mkdir(parents=True, exist_ok=True)
+
+        # Create a unique credential helper script
+        self._credential_file = credential_dir / f"cred_helper_basic_{id(self)}"
+
+        # Use provided username and password
+        username = self.git_username
+        password = self.git_password
+
+        # Write git credential helper script
+        script_content = f'''#!/bin/bash
+# Git credential helper for basic authentication
+if [ "$1" = "get" ]; then
+    echo "protocol={parsed.scheme}"
+    echo "host={parsed.netloc}"
+    echo "username={username}"
+    echo "password={password}"
     echo ""
 elif [ "$1" = "store" ] || [ "$1" = "erase" ]; then
     # Do nothing - we don't store credentials
@@ -281,7 +460,7 @@ fi
         """
         # Log clone start
         self._log_info("===== 开始克隆 Git 仓库 =====")
-        self._log_info(f"仓库地址: {self.git_url}")
+        self._log_info(f"仓库地址: {self._get_safe_url()}")
         self._log_info(f"指定分支: {branch if branch else '默认分支'}")
 
         if target_dir is None:
@@ -596,6 +775,8 @@ def git_context(
     branch: str,
     ssh_key: str | None = None,
     git_token: str | None = None,
+    git_username: str | None = None,
+    git_password: str | None = None,
     logger: "DeploymentLogger | None" = None,
 ) -> Generator[GitService, None, None]:
     """Context manager for Git operations.
@@ -604,13 +785,22 @@ def git_context(
         git_url: Git repository URL (SSH or HTTPS format)
         branch: Branch to checkout
         ssh_key: Optional SSH private key for SSH private repositories
-        git_token: Optional access token for HTTPS private repositories
+        git_token: Optional OAuth2 access token for HTTPS private repositories
+        git_username: Optional username for basic authentication
+        git_password: Optional password for basic authentication
         logger: Optional DeploymentLogger for logging operations
 
     Yields:
         Git service instance
     """
-    service = GitService(git_url, ssh_key=ssh_key, git_token=git_token, logger=logger)
+    service = GitService(
+        git_url,
+        ssh_key=ssh_key,
+        git_token=git_token,
+        git_username=git_username,
+        git_password=git_password,
+        logger=logger,
+    )
     try:
         service.clone()
         service.checkout_branch(branch)
@@ -623,6 +813,8 @@ def get_remote_branches(
     git_url: str,
     ssh_key: str | None = None,
     git_token: str | None = None,
+    git_username: str | None = None,
+    git_password: str | None = None,
     logger: "DeploymentLogger | None" = None,
 ) -> list[str]:
     """Get list of remote branches without cloning.
@@ -630,7 +822,9 @@ def get_remote_branches(
     Args:
         git_url: Git repository URL (SSH or HTTPS format)
         ssh_key: Optional SSH private key for SSH private repositories
-        git_token: Optional access token for HTTPS private repositories
+        git_token: Optional OAuth2 access token for HTTPS private repositories
+        git_username: Optional username for basic authentication
+        git_password: Optional password for basic authentication
         logger: Optional DeploymentLogger for logging operations
 
     Returns:
@@ -639,7 +833,14 @@ def get_remote_branches(
     Raises:
         GitError: If failed to get branches
     """
-    service = GitService(git_url, ssh_key=ssh_key, git_token=git_token, logger=logger)
+    service = GitService(
+        git_url,
+        ssh_key=ssh_key,
+        git_token=git_token,
+        git_username=git_username,
+        git_password=git_password,
+        logger=logger,
+    )
     try:
         service.clone()
         return service.get_branches()

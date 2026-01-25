@@ -17,6 +17,13 @@ depends_on = None
 
 
 def upgrade():
+    # Add deployment_type column to deployments table
+    op.add_column(
+        'deployments',
+        sa.Column('deployment_type', sa.String(20), nullable=False, server_default='full')
+    )
+    op.create_index('ix_deployments_deployment_type', 'deployments', ['deployment_type'])
+
     # Add progress column to deployments table
     op.add_column(
         'deployments',
@@ -41,3 +48,5 @@ def downgrade():
     op.drop_column('deployments', 'total_steps')
     op.drop_column('deployments', 'current_step')
     op.drop_column('deployments', 'progress')
+    op.drop_index('ix_deployments_deployment_type', table_name='deployments')
+    op.drop_column('deployments', 'deployment_type')

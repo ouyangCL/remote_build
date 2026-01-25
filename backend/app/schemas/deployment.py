@@ -10,7 +10,7 @@ class DeploymentCreate(BaseModel):
     """Deployment creation schema."""
 
     project_id: int = Field(..., ge=1)
-    branch: str = Field(..., min_length=1, max_length=100)
+    branch: str = Field("", min_length=0, max_length=100)  # Optional for restart_only mode
     server_group_ids: list[int] = Field(..., min_length=1)
     deployment_type: DeploymentType = Field(default=DeploymentType.FULL)
 

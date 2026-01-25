@@ -15,7 +15,7 @@ from app.models.audit_log import AuditAction
 from app.core.permissions import Permission
 from app.db.session import get_db
 from app.dependencies import get_current_user, get_current_user_from_token
-from app.models.deployment import Deployment, DeploymentLog, DeploymentStatus
+from app.models.deployment import Deployment, DeploymentLog, DeploymentStatus, DeploymentType
 from app.models.project import Project
 from app.models.server import ServerGroup
 from app.models.user import User, UserRole
@@ -95,10 +95,15 @@ async def create_deployment(
     # Validate environment consistency
     EnvironmentService.validate_deployment_environment(project, server_groups)
 
+    # Handle branch for restart_only mode: use placeholder if empty
+    branch = deployment_data.branch
+    if not branch and deployment_data.deployment_type == DeploymentType.RESTART_ONLY:
+        branch = "-"  # Placeholder for restart-only deployments
+
     # Create deployment - inherit environment from project
     deployment = Deployment(
         project_id=deployment_data.project_id,
-        branch=deployment_data.branch,
+        branch=branch,
         status=DeploymentStatus.PENDING,
         created_by=current_user.id,
         server_groups=server_groups,
@@ -174,6 +179,7 @@ async def create_deployment(
         project_id=deployment.project_id,
         branch=deployment.branch,
         status=str(deployment.status),
+        deployment_type=deployment.deployment_type,
         progress=deployment.progress,
         current_step=deployment.current_step,
         total_steps=deployment.total_steps,
