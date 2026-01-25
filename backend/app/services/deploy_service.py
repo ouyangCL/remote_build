@@ -294,6 +294,7 @@ class DeploymentService:
                 project_type=self.deployment.project.project_type,
                 install_script=self.deployment.project.install_script,
                 auto_install=self.deployment.project.auto_install,
+                project_id=self.deployment.project.id,
             )
 
             # Execute build

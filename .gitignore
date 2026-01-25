@@ -36,3 +36,24 @@ frontend/.vite/
 
 # Logs
 *.log
+logs/
+
+# Artifacts - 构建产物
+backend/artifacts/
+*.zip
+
+# Backups - 备份文件
+*.backup
+*.bak
+*.db.backup
+
+# Work directories
+backend/work/
+
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Alembic
+alembic/versions/*.bak

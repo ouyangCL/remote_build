@@ -55,6 +55,7 @@ class BuildService:
         project_type: str = "frontend",
         install_script: str | None = None,
         auto_install: bool = True,
+        project_id: int | None = None,
     ) -> None:
         """Initialize build service.
 
@@ -67,6 +68,7 @@ class BuildService:
             project_type: Project type (frontend/backend/java) for default install commands
             install_script: Custom dependency installation command
             auto_install: Whether to automatically install dependencies
+            project_id: Project ID for artifact cleanup
         """
         self.source_dir = Path(source_dir)
         self.build_script = build_script
@@ -76,6 +78,7 @@ class BuildService:
         self.project_type = project_type
         self.install_script = install_script
         self.auto_install = auto_install
+        self.project_id = project_id
         self._cancelled = False
 
     def cancel(self) -> None:
@@ -501,6 +504,17 @@ class BuildService:
         else:
             self._log_info(f"压缩完成: {compressed_size_str}")
 
+        # Clean up old artifacts (keep only the latest one)
+        try:
+            cleanup_artifacts(
+                project_id=self.project_id,
+                keep_latest=True,
+                logger=self.logger,
+            )
+        except Exception as e:
+            # Cleanup failure should not affect the build process
+            self._log_warning(f"清理旧 artifacts 时出错: {e}")
+
         return artifact_path
 
     def _calculate_checksum(self, file_path: Path) -> str:
@@ -521,41 +535,190 @@ class BuildService:
         return sha256.hexdigest()
 
 
-def cleanup_artifacts(max_size_mb: int | None = None) -> None:
-    """Clean up old artifacts if total size exceeds limit.
+def cleanup_artifacts(
+    project_id: int | None = None,
+    max_size_mb: int | None = None,
+    keep_latest: bool = True,
+    logger: "DeploymentLogger | None" = None,
+) -> None:
+    """Clean up old artifacts.
 
     Args:
-        max_size_mb: Maximum size in MB
+        project_id: Project ID to filter artifacts. If None, cleans all artifacts.
+        max_size_mb: Maximum size in MB (deprecated, use keep_latest instead).
+        keep_latest: If True, keeps only the latest artifact per project.
+        logger: DeploymentLogger for logging cleanup actions.
     """
-    if max_size_mb is None:
-        max_size_mb = settings.max_artifacts_size_mb
-
     artifacts_dir = Path(settings.artifacts_dir)
     if not artifacts_dir.exists():
         return
 
     # Get all artifacts with their stats
     artifacts = []
-    total_size = 0
+    for artifact_path in artifacts_dir.glob("artifact_*.zip"):
+        try:
+            stat = artifact_path.stat()
+            artifacts.append({
+                "path": artifact_path,
+                "mtime": stat.st_mtime,
+                "size": stat.st_size,
+                "name": artifact_path.name,
+            })
+        except OSError:
+            # Skip files that can't be accessed
+            continue
 
-    for artifact in artifacts_dir.glob("artifact_*.zip"):
-        size = artifact.stat().st_size
-        total_size += size
-        artifacts.append((artifact.stat().st_mtime, artifact, size))
-
-    # Check if size limit exceeded
-    total_size_mb = total_size / (1024 * 1024)
-    if total_size_mb <= max_size_mb:
+    if not artifacts:
         return
 
-    # Sort by modification time (oldest first)
-    artifacts.sort(key=lambda x: x[0])
+    # Sort by modification time (newest first)
+    artifacts.sort(key=lambda x: x["mtime"], reverse=True)
 
-    # Delete oldest artifacts until under limit
-    for mtime, artifact, size in artifacts:
-        artifact.unlink()
-        total_size -= size
+    # Group by project if project_id is specified
+    if project_id is not None:
+        # Filter artifacts belonging to this project
+        # Note: Since artifacts are named by timestamp, we need to query the database
+        # to find which artifacts belong to which project
+        from app.db.session import SessionLocal
+        from app.models.deployment import DeploymentArtifact
+
+        db = SessionLocal()
+        try:
+            # Get all artifact file paths for this project
+            project_artifacts = db.query(DeploymentArtifact).join(
+                DeploymentArtifact.deployment
+            ).filter(
+                DeploymentArtifact.deployment.has(project_id=project_id)
+            ).all()
+
+            project_file_paths = {artifact.file_path for artifact in project_artifacts}
+
+            # Filter artifacts to only those belonging to this project
+            filtered_artifacts = [
+                a for a in artifacts
+                if str(a["path"]) in project_file_paths
+            ]
+            artifacts = filtered_artifacts
+        finally:
+            db.close()
+
+    if not artifacts:
+        return
+
+    # Keep only the latest artifact
+    if keep_latest and len(artifacts) > 1:
+        artifacts_to_delete = artifacts[1:]  # Keep the first (newest) one
+        total_deleted_size = 0
+        deleted_count = 0
+        deleted_names = []
+
+        for artifact in artifacts_to_delete:
+            try:
+                total_deleted_size += artifact["size"]
+                deleted_names.append(artifact["name"])
+                artifact["path"].unlink()
+                deleted_count += 1
+            except OSError as e:
+                _log_cleanup_warning(
+                    logger,
+                    f"删除 artifact 失败: {artifact['name']} - {e}"
+                )
+
+        # Log cleanup results
+        if deleted_count > 0:
+            # Format size for display
+            if total_deleted_size < 1024:
+                size_str = f"{total_deleted_size} B"
+            elif total_deleted_size < 1024 * 1024:
+                size_str = f"{total_deleted_size / 1024:.2f} KB"
+            else:
+                size_str = f"{total_deleted_size / (1024 * 1024):.2f} MB"
+
+            _log_cleanup_info(
+                logger,
+                f"Artifact 清理完成：删除 {deleted_count} 个旧文件，"
+                f"释放 {size_str} 磁盘空间"
+            )
+
+            if deleted_count <= 5:  # Only list names if not too many
+                for name in deleted_names:
+                    _log_cleanup_info(logger, f"  - 已删除: {name}")
+            else:
+                _log_cleanup_info(
+                    logger,
+                    f"  - 已删除: {deleted_names[0]}, {deleted_names[1]}, "
+                    f"... (共 {deleted_count} 个文件)"
+                )
+
+    # Legacy: size-based cleanup (deprecated)
+    elif max_size_mb is not None:
+        total_size = sum(a["size"] for a in artifacts)
         total_size_mb = total_size / (1024 * 1024)
 
-        if total_size_mb <= max_size_mb:
-            break
+        if total_size_mb > max_size_mb:
+            # Sort by modification time (oldest first)
+            artifacts.sort(key=lambda x: x["mtime"])
+
+            # Delete oldest artifacts until under limit
+            deleted_count = 0
+            for artifact in artifacts:
+                artifact["path"].unlink()
+                total_size -= artifact["size"]
+                deleted_count += 1
+                total_size_mb = total_size / (1024 * 1024)
+
+                if total_size_mb <= max_size_mb:
+                    break
+
+            _log_cleanup_info(
+                logger,
+                f"基于大小的清理：删除 {deleted_count} 个旧 artifact"
+            )
+
+
+def _log_cleanup_info(logger: "DeploymentLogger | None", message: str) -> None:
+    """Log info message during cleanup.
+
+    Args:
+        logger: DeploymentLogger instance
+        message: Message to log
+    """
+    if logger:
+        try:
+            import asyncio
+
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            if loop.is_running():
+                asyncio.create_task(logger.info(message))
+            else:
+                loop.run_until_complete(logger.info(message))
+        except Exception:
+            pass
+
+
+def _log_cleanup_warning(logger: "DeploymentLogger | None", message: str) -> None:
+    """Log warning message during cleanup.
+
+    Args:
+        logger: DeploymentLogger instance
+        message: Message to log
+    """
+    if logger:
+        try:
+            import asyncio
+
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+
+            if loop.is_running():
+                asyncio.create_task(logger.warning(message))
+            else:
+                loop.run_until_complete(logger.warning(message))
+        except Exception:
+            pass
