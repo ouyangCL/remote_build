@@ -59,6 +59,75 @@
 
 ---
 
+## 服务器运维
+
+### 安全重启后端容器
+
+当需要重新创建后端容器时（如更新镜像、修改配置等），请使用以下步骤确保数据不丢失：
+
+**方式一：使用安全重启脚本（推荐）**
+
+```bash
+/opt/devops/scripts/restart-backend.sh
+```
+
+该脚本会自动：
+1. 备份当前数据库到 `/opt/devops/backups/`
+2. 安全停止旧容器
+3. 启动新容器（挂载原有数据目录）
+4. 自动运行数据库迁移
+5. 配置网络连接
+
+**方式二：手动重启**
+
+```bash
+# 1. 备份数据库
+cp /opt/devops/data/devops.db /opt/devops/backups/devops.db.$(date +%Y%m%d_%H%M%S)
+
+# 2. 停止并删除旧容器
+docker stop devops-backend
+docker rm devops-backend
+
+# 3. 启动新容器（注意挂载 /opt/devops/data）
+docker run -d \
+  --name devops-backend \
+  --restart unless-stopped \
+  -p 9090:9090 \
+  -v /opt/devops/data:/app/data \
+  -v /opt/devops/work:/app/work \
+  -v /opt/devops/artifacts:/app/artifacts \
+  -v /opt/devops/logs:/app/logs \
+  --network docker_devops-network \
+  docker-backend:new
+
+# 4. 配置网络别名
+docker network connect docker_devops-network devops-backend --alias backend
+```
+
+### 数据迁移
+
+当数据库结构有变更时，Alembic 会自动检测并迁移：
+
+```bash
+# 手动运行迁移
+docker exec devops-backend alembic upgrade head
+```
+
+### 备份与恢复
+
+**备份数据库：**
+```bash
+cp /opt/devops/data/devops.db /opt/devops/backups/devops.db.$(date +%Y%m%d_%H%M%S)
+```
+
+**恢复数据库：**
+```bash
+cp /opt/devops/backups/devops.db.YYYYMMDD_HHMMSS /opt/devops/data/devops.db
+docker restart devops-backend
+```
+
+---
+
 ## 快速开始
 
 ### 环境要求

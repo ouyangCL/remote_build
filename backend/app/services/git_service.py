@@ -116,13 +116,14 @@ class GitService:
         if self.git_token and not is_public_platform:
             # For private servers:
             # - If username is provided, use username:password or username:token
-            # - If only token is provided, use :token (empty username, common for Git servers)
+            # - If only token is provided, use oauth2:token (GitLab standard format)
             if self.git_username:
                 username = self.git_username
                 password = self.git_password if self.git_password else self.git_token
             else:
-                # Use empty username with token (common Git server authentication)
-                username = ""
+                # Use oauth2 as username for token-based authentication
+                # This follows GitLab's standard: https://<username>:<token>@gitlab.example.com/repo.git
+                username = "oauth2"
                 password = self.git_token
 
             # Rebuild URL with embedded credentials
