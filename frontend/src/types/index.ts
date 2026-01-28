@@ -106,7 +106,7 @@ export interface Deployment {
   project_id: number
   branch: string
   status: 'pending' | 'cloning' | 'building' | 'uploading' | 'deploying' | 'success' | 'failed' | 'cancelled' | 'rollback' | 'queued' | 'restarting' | 'health_checking'
-  deployment_type?: 'full' | 'restart_only'
+  deployment_type?: 'full' | 'restart_only' | 'upload'
   progress: number
   current_step?: string
   total_steps: number
