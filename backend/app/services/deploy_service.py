@@ -472,7 +472,10 @@ class DeploymentService:
         upload_path: str,
         artifact_path: Path,
     ) -> None:
-        """Deploy backend project to server (original deployment logic).
+        """Deploy backend/java project to server.
+
+        对于 jar 文件直接上传，不需要解压。
+        对于 zip 文件解压到 upload_path 目录。
 
         Args:
             conn: SSH connection
@@ -483,6 +486,7 @@ class DeploymentService:
         remote_artifact = f"{upload_path}/{artifact_path.name}"
 
         await self.logger.info(f"上传部署产物到: {remote_artifact}")
+
         # Ensure upload directory exists
         mkdir_command = f"mkdir -p {upload_path}"
         exit_code, stdout, stderr = conn.execute_command(mkdir_command)
@@ -494,14 +498,18 @@ class DeploymentService:
         conn.upload_file(artifact_path, remote_artifact)
         await self.logger.info(f"部署产物上传完成: {remote_artifact}")
 
-        # 解压zip包到upload_path目录
-        await self.logger.info(f"解压部署产物到: {upload_path}")
-        unzip_command = f"unzip -o {remote_artifact} -d {upload_path}"
-        exit_code, stdout, stderr = conn.execute_command(unzip_command)
-        if exit_code != 0:
-            await self.logger.error(f"解压失败: {stderr}")
-            raise DeploymentError(f"Failed to unzip artifact: {stderr}")
-        await self.logger.info("解压完成")
+        # 判断文件类型，jar 不需要解压
+        if artifact_path.name.endswith('.jar'):
+            await self.logger.info("Java jar 包部署完成，无需解压")
+        else:
+            # 解压zip包到upload_path目录
+            await self.logger.info(f"解压部署产物到: {upload_path}")
+            unzip_command = f"unzip -o {remote_artifact} -d {upload_path}"
+            exit_code, stdout, stderr = conn.execute_command(unzip_command)
+            if exit_code != 0:
+                await self.logger.error(f"解压失败: {stderr}")
+                raise DeploymentError(f"Failed to unzip artifact: {stderr}")
+            await self.logger.info("解压完成")
 
     async def _deploy_frontend_to_server(
         self,
