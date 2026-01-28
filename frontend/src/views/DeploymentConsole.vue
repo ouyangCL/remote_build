@@ -36,7 +36,7 @@
               </el-select>
             </el-form-item>
 
-            <el-form-item label="分支">
+            <el-form-item v-if="form.deployment_type !== 'upload'" label="分支">
               <el-input
                 v-model="form.branch"
                 placeholder="请输入分支名称（如：main、develop）"
@@ -62,6 +62,12 @@
                   <div class="radio-option">
                     <span class="radio-label">仅重启</span>
                     <span class="radio-desc">跳过构建，直接执行重启脚本</span>
+                  </div>
+                </el-radio>
+                <el-radio label="upload">
+                  <div class="radio-option">
+                    <span class="radio-label">上传部署包</span>
+                    <span class="radio-desc">直接上传构建好的部署包</span>
                   </div>
                 </el-radio>
               </el-radio-group>
@@ -112,7 +118,35 @@
               </el-alert>
             </el-form-item>
 
+            <!-- 上传部署包时显示 -->
+            <el-form-item v-if="form.deployment_type === 'upload'" label="部署包" required>
+              <el-upload
+                ref="uploadRef"
+                :auto-upload="false"
+                :limit="1"
+                :on-change="handleFileChange"
+                :on-remove="handleFileRemove"
+                drag
+                class="deploy-upload"
+              >
+                <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
+                <div class="el-upload__text">
+                  将文件拖到此处，或<em>点击上传</em>
+                </div>
+                <template #tip>
+                  <div class="el-upload__tip">
+                    {{ uploadHint }}
+                  </div>
+                </template>
+              </el-upload>
+            </el-form-item>
+
             <el-form-item>
+              <!-- 上传进度 -->
+              <div v-if="uploadProgress > 0 && uploadProgress < 100" class="upload-progress">
+                <el-progress :percentage="uploadProgress" />
+              </div>
+
               <el-button
                 type="primary"
                 @click="handleDeploy"
@@ -240,7 +274,8 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onUnmounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
-import { InfoFilled, Search, Download, Warning } from '@element-plus/icons-vue'
+import { InfoFilled, Search, Download, Warning, UploadFilled } from '@element-plus/icons-vue'
+import type { UploadFile } from 'element-plus'
 import { projects as projectsApi, servers as serversApi, deployments as deploymentsApi } from '@/api'
 import { ENVIRONMENT_DISPLAY } from '@/types'
 import type { Project, ServerGroup, DeploymentLog, Environment, Deployment } from '@/types'
@@ -269,21 +304,36 @@ const searchKeyword = ref('')
 // 折叠重复行
 const collapseDuplicates = ref(false)
 
+// 文件上传相关
+const uploadRef = ref<InstanceType<typeof ElUpload>>()
+const uploadedFile = ref<File | null>(null)
+const uploadProgress = ref(0)
+
 const form = reactive({
   project_id: null as number | null,
   branch: '',
   server_group_ids: [] as number[],
-  deployment_type: 'full' as 'full' | 'restart_only',
+  deployment_type: 'full' as 'full' | 'restart_only' | 'upload',
 })
 
 const canDeploy = computed(
   () => form.project_id && form.server_group_ids.length > 0 &&
-       (form.deployment_type === 'full' ? form.branch : true)
+       (form.deployment_type === 'full' ? form.branch : true) &&
+       (form.deployment_type === 'upload' ? uploadedFile.value !== null : true)
 )
 
 const selectedProject = computed(() =>
   projects.value.find(p => p.id === form.project_id) || null
 )
+
+// 上传提示文本
+const uploadHint = computed(() => {
+  if (!selectedProject.value) return '请先选择项目'
+  if (selectedProject.value.project_type === 'java') {
+    return '请上传 .jar 文件'
+  }
+  return '请上传 dist 目录的 .zip 压缩包'
+})
 
 const filteredServerGroups = computed(() => {
   if (!selectedProject.value) {
@@ -620,6 +670,20 @@ function handleProjectChange() {
 
   // 清空服务器组选择，因为环境可能不匹配
   form.server_group_ids = []
+  // 清空上传文件
+  uploadedFile.value = null
+}
+
+// 文件选择处理
+function handleFileChange(file: UploadFile) {
+  if (file.raw) {
+    uploadedFile.value = file.raw
+  }
+}
+
+// 文件移除处理
+function handleFileRemove() {
+  uploadedFile.value = null
 }
 
 async function handleDeploy() {
@@ -631,18 +695,35 @@ async function handleDeploy() {
   usePolling = false  // 重置轮询标志
   sseReconnectAttempts = 0  // 重置SSE重连计数
   maxLogId = 0  // 重置日志ID跟踪
+  uploadProgress.value = 0  // 重置上传进度
 
   // 停止所有现有的连接和轮询
   cleanupSSE()
   stopStatusPolling()
 
   try {
-    const deployment = await deploymentsApi.create({
-      project_id: form.project_id!,
-      branch: form.branch,
-      server_group_ids: form.server_group_ids,
-      deployment_type: form.deployment_type,
-    })
+    let deployment: Deployment
+
+    // 根据部署类型调用不同的API
+    if (form.deployment_type === 'upload' && uploadedFile.value) {
+      // 上传部署包模式
+      deployment = await deploymentsApi.createUploadDeployment(
+        form.project_id!,
+        form.server_group_ids,
+        uploadedFile.value,
+        (progress) => {
+          uploadProgress.value = progress
+        }
+      )
+    } else {
+      // 普通部署模式
+      deployment = await deploymentsApi.create({
+        project_id: form.project_id!,
+        branch: form.branch,
+        server_group_ids: form.server_group_ids,
+        deployment_type: form.deployment_type === 'upload' ? undefined : form.deployment_type,
+      })
+    }
 
     currentDeployment.value = deployment
 
@@ -977,6 +1058,14 @@ onUnmounted(() => {
 .radio-desc {
   font-size: 12px;
   color: #909399;
+}
+
+.deploy-upload {
+  width: 100%;
+}
+
+.upload-progress {
+  margin-bottom: 12px;
 }
 
 .logs-header {

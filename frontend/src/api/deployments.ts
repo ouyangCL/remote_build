@@ -20,6 +20,31 @@ export default {
   rollback: (id: number, serverGroupIds: number[]): Promise<Deployment> =>
     api.post(`/deployments/${id}/rollback`, { server_group_ids: serverGroupIds }, { timeout: 120000 }), // 2 minutes timeout
 
+  // 上传部署包创建部署
+  createUploadDeployment: (
+    projectId: number,
+    serverGroupIds: number[],
+    file: File,
+    onProgress?: (progress: number) => void
+  ): Promise<Deployment> => {
+    const formData = new FormData()
+    formData.append('project_id', projectId.toString())
+    formData.append('server_group_ids', serverGroupIds.join(','))
+    formData.append('file', file)
+
+    return api.post<Deployment>('/deployments/upload', formData, {
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      },
+      onUploadProgress: (progressEvent) => {
+        if (onProgress && progressEvent.total) {
+          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+          onProgress(progress)
+        }
+      }
+    })
+  },
+
   // SSE log stream
   streamLogs: (id: number) => {
     const token = localStorage.getItem('access_token')

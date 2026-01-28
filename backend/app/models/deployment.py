@@ -26,6 +26,7 @@ class DeploymentType(str, enum.Enum):
 
     FULL = "full"  # 完整部署（包含克隆、构建、上传）
     RESTART_ONLY = "restart_only"  # 仅重启（不构建）
+    UPLOAD = "upload"  # 上传部署包（新增）
 
 
 class DeploymentStatus(str, enum.Enum):

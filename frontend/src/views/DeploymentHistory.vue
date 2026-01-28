@@ -13,8 +13,8 @@
         <el-table-column prop="project.name" label="项目" />
         <el-table-column label="部署类型" width="120">
           <template #default="{ row }">
-            <el-tag :type="row.deployment_type === 'full' ? 'primary' : 'warning'" size="small">
-              {{ row.deployment_type === 'full' ? '完整部署' : '仅重启' }}
+            <el-tag :type="getDeploymentTypeTagType(row.deployment_type)" size="small">
+              {{ getDeploymentTypeLabel(row.deployment_type) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -69,8 +69,8 @@
             {{ currentDeployment.project?.name }}
           </el-descriptions-item>
           <el-descriptions-item label="部署类型">
-            <el-tag :type="currentDeployment.deployment_type === 'full' ? 'primary' : 'warning'" size="small">
-              {{ currentDeployment.deployment_type === 'full' ? '完整部署' : '仅重启' }}
+            <el-tag :type="getDeploymentTypeTagType(currentDeployment.deployment_type)" size="small">
+              {{ getDeploymentTypeLabel(currentDeployment.deployment_type) }}
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="分支">
@@ -180,6 +180,21 @@ function getStatusLabel(status: string) {
 
 function formatTime(time: string) {
   return new Date(time).toLocaleString()
+}
+
+function getDeploymentTypeLabel(type?: string) {
+  const labels: Record<string, string> = {
+    full: '完整部署',
+    restart_only: '仅重启',
+    upload: '上传部署包'
+  }
+  return labels[type || 'full'] || type || '完整部署'
+}
+
+function getDeploymentTypeTagType(type?: string) {
+  if (type === 'upload') return 'success'
+  if (type === 'restart_only') return 'warning'
+  return 'primary'
 }
 
 onMounted(() => {

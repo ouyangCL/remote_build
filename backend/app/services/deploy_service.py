@@ -154,6 +154,8 @@ class DeploymentService:
 
             if self.deployment.deployment_type == DeploymentType.RESTART_ONLY:
                 await self._restart_only_deploy()
+            elif self.deployment.deployment_type == DeploymentType.UPLOAD:
+                await self._upload_deploy()
             else:
                 await self._full_deploy()
 
@@ -234,6 +236,47 @@ class DeploymentService:
         # Success
         await self._update_status(DeploymentStatus.SUCCESS)
         await self.logger.info("Restart-only deployment completed successfully")
+
+    async def _upload_deploy(self) -> None:
+        """Execute upload deployment (no clone, no build, use uploaded artifact).
+
+        Raises:
+            DeploymentError: If deployment fails
+        """
+        try:
+            project = self.deployment.project
+            await self.logger.info(f"Starting upload deployment: {project.name}")
+
+            # Check if deployment has artifact
+            if not self.deployment.artifacts:
+                raise DeploymentError("No artifact found for upload deployment")
+
+            artifact = self.deployment.artifacts[0]
+            await self.logger.info(f"Using uploaded artifact: {artifact.file_path}")
+
+            # Step 1: Deploy to servers (skip clone and build)
+            await self._update_status(DeploymentStatus.DEPLOYING)
+            await self._deploy_to_servers(artifact.file_path)
+
+            if self._cancelled:
+                await self._handle_cancel()
+                return
+
+            # Step 2: Health check (if enabled)
+            if self.deployment.project.health_check_enabled:
+                await self._update_status(DeploymentStatus.HEALTH_CHECKING)
+                await self._perform_health_checks()
+
+                if self._cancelled:
+                    await self._handle_cancel()
+                    return
+
+            # Step 3: Success
+            await self._update_status(DeploymentStatus.SUCCESS)
+            await self.logger.info("Upload deployment completed successfully")
+        finally:
+            # 确保无论成功或失败都清理临时文件
+            await self._cleanup_temp_files()
 
     async def _clone_repo(self) -> None:
         """Clone Git repository."""
@@ -429,7 +472,10 @@ class DeploymentService:
         upload_path: str,
         artifact_path: Path,
     ) -> None:
-        """Deploy backend project to server (original deployment logic).
+        """Deploy backend/java project to server.
+
+        对于 jar 文件直接上传，不需要解压。
+        对于 zip 文件解压到 upload_path 目录。
 
         Args:
             conn: SSH connection
@@ -440,6 +486,7 @@ class DeploymentService:
         remote_artifact = f"{upload_path}/{artifact_path.name}"
 
         await self.logger.info(f"上传部署产物到: {remote_artifact}")
+
         # Ensure upload directory exists
         mkdir_command = f"mkdir -p {upload_path}"
         exit_code, stdout, stderr = conn.execute_command(mkdir_command)
@@ -451,14 +498,18 @@ class DeploymentService:
         conn.upload_file(artifact_path, remote_artifact)
         await self.logger.info(f"部署产物上传完成: {remote_artifact}")
 
-        # 解压zip包到upload_path目录
-        await self.logger.info(f"解压部署产物到: {upload_path}")
-        unzip_command = f"unzip -o {remote_artifact} -d {upload_path}"
-        exit_code, stdout, stderr = conn.execute_command(unzip_command)
-        if exit_code != 0:
-            await self.logger.error(f"解压失败: {stderr}")
-            raise DeploymentError(f"Failed to unzip artifact: {stderr}")
-        await self.logger.info("解压完成")
+        # 判断文件类型，jar 不需要解压
+        if artifact_path.name.endswith('.jar'):
+            await self.logger.info("Java jar 包部署完成，无需解压")
+        else:
+            # 解压zip包到upload_path目录
+            await self.logger.info(f"解压部署产物到: {upload_path}")
+            unzip_command = f"unzip -o {remote_artifact} -d {upload_path}"
+            exit_code, stdout, stderr = conn.execute_command(unzip_command)
+            if exit_code != 0:
+                await self.logger.error(f"解压失败: {stderr}")
+                raise DeploymentError(f"Failed to unzip artifact: {stderr}")
+            await self.logger.info("解压完成")
 
     async def _deploy_frontend_to_server(
         self,
@@ -741,8 +792,24 @@ class DeploymentService:
 
     async def _handle_cancel(self) -> None:
         """Handle deployment cancellation."""
+        await self._cleanup_temp_files()
         await self._update_status(DeploymentStatus.CANCELLED)
         await self.logger.warning("Deployment was cancelled")
+
+    async def _cleanup_temp_files(self) -> None:
+        """清理上传的临时文件."""
+        if not self.deployment.artifacts:
+            return
+
+        artifact = self.deployment.artifacts[0]
+        file_path = Path(artifact.file_path)
+
+        if file_path.exists():
+            try:
+                file_path.unlink()
+                await self.logger.info(f"已清理临时文件: {file_path}")
+            except Exception as e:
+                await self.logger.warning(f"清理临时文件失败: {e}")
 
 
 async def execute_deployment(
