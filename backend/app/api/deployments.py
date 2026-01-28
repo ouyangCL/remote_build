@@ -481,6 +481,9 @@ async def create_upload_deployment(
     if not project:
         raise HTTPException(status_code=404, detail="项目不存在")
 
+    # 验证文件类型（在读取文件内容之前，避免昂贵的I/O操作）
+    validate_upload_file(project.project_type, file.filename)
+
     # 验证服务器组
     server_groups = []
     for group_id in group_ids:
@@ -494,9 +497,6 @@ async def create_upload_deployment(
 
     # 验证环境一致性
     EnvironmentService.validate_deployment_environment(project, server_groups)
-
-    # 验证文件类型
-    validate_upload_file(project.project_type, file.filename)
 
     # 创建临时目录保存上传文件
     temp_dir = Path(tempfile.gettempdir()) / "deployments"

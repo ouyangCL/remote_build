@@ -243,36 +243,40 @@ class DeploymentService:
         Raises:
             DeploymentError: If deployment fails
         """
-        project = self.deployment.project
-        await self.logger.info(f"Starting upload deployment: {project.name}")
+        try:
+            project = self.deployment.project
+            await self.logger.info(f"Starting upload deployment: {project.name}")
 
-        # Check if deployment has artifact
-        if not self.deployment.artifacts:
-            raise DeploymentError("No artifact found for upload deployment")
+            # Check if deployment has artifact
+            if not self.deployment.artifacts:
+                raise DeploymentError("No artifact found for upload deployment")
 
-        artifact = self.deployment.artifacts[0]
-        await self.logger.info(f"Using uploaded artifact: {artifact.file_path}")
+            artifact = self.deployment.artifacts[0]
+            await self.logger.info(f"Using uploaded artifact: {artifact.file_path}")
 
-        # Step 1: Deploy to servers (skip clone and build)
-        await self._update_status(DeploymentStatus.DEPLOYING)
-        await self._deploy_to_servers(artifact.file_path)
-
-        if self._cancelled:
-            await self._handle_cancel()
-            return
-
-        # Step 2: Health check (if enabled)
-        if self.deployment.project.health_check_enabled:
-            await self._update_status(DeploymentStatus.HEALTH_CHECKING)
-            await self._perform_health_checks()
+            # Step 1: Deploy to servers (skip clone and build)
+            await self._update_status(DeploymentStatus.DEPLOYING)
+            await self._deploy_to_servers(artifact.file_path)
 
             if self._cancelled:
                 await self._handle_cancel()
                 return
 
-        # Step 3: Success
-        await self._update_status(DeploymentStatus.SUCCESS)
-        await self.logger.info("Upload deployment completed successfully")
+            # Step 2: Health check (if enabled)
+            if self.deployment.project.health_check_enabled:
+                await self._update_status(DeploymentStatus.HEALTH_CHECKING)
+                await self._perform_health_checks()
+
+                if self._cancelled:
+                    await self._handle_cancel()
+                    return
+
+            # Step 3: Success
+            await self._update_status(DeploymentStatus.SUCCESS)
+            await self.logger.info("Upload deployment completed successfully")
+        finally:
+            # 确保无论成功或失败都清理临时文件
+            await self._cleanup_temp_files()
 
     async def _clone_repo(self) -> None:
         """Clone Git repository."""
@@ -780,8 +784,24 @@ class DeploymentService:
 
     async def _handle_cancel(self) -> None:
         """Handle deployment cancellation."""
+        await self._cleanup_temp_files()
         await self._update_status(DeploymentStatus.CANCELLED)
         await self.logger.warning("Deployment was cancelled")
+
+    async def _cleanup_temp_files(self) -> None:
+        """清理上传的临时文件."""
+        if not self.deployment.artifacts:
+            return
+
+        artifact = self.deployment.artifacts[0]
+        file_path = Path(artifact.file_path)
+
+        if file_path.exists():
+            try:
+                file_path.unlink()
+                await self.logger.info(f"已清理临时文件: {file_path}")
+            except Exception as e:
+                await self.logger.warning(f"清理临时文件失败: {e}")
 
 
 async def execute_deployment(
