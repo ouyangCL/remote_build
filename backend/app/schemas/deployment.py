@@ -9,9 +9,9 @@ from app.models.deployment import DeploymentType
 class DeploymentCreate(BaseModel):
     """Deployment creation schema."""
 
-    project_id: int = Field(..., ge=1)
+    project_id: int = Field(...)
     branch: str = Field("", min_length=0, max_length=100)  # Optional for restart_only mode
-    server_group_ids: list[int] = Field(..., min_length=1)
+    server_group_ids: list[int] = Field(..., min_items=1)
     deployment_type: DeploymentType = Field(default=DeploymentType.FULL)
 
 
@@ -45,7 +45,14 @@ class DeploymentDetailResponse(DeploymentResponse):
     logs: list[dict] = []
 
 
+class DeploymentUploadCreate(BaseModel):
+    """上传部署包创建请求"""
+
+    project_id: int = Field(..., description="项目ID")
+    server_group_ids: list[int] = Field(..., min_items=1, description="服务器组ID列表")
+
+
 class RollbackCreate(BaseModel):
     """Rollback creation schema."""
 
-    server_group_ids: list[int] = Field(..., min_length=1)
+    server_group_ids: list[int] = Field(..., min_items=1)
