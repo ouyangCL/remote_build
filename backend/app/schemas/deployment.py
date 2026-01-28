@@ -45,6 +45,13 @@ class DeploymentDetailResponse(DeploymentResponse):
     logs: list[dict] = []
 
 
+class DeploymentUploadCreate(BaseModel):
+    """上传部署包创建请求"""
+
+    project_id: int = Field(..., ge=1, description="项目ID")
+    server_group_ids: list[int] = Field(..., min_length=1, description="服务器组ID列表")
+
+
 class RollbackCreate(BaseModel):
     """Rollback creation schema."""
 
