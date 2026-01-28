@@ -154,6 +154,8 @@ class DeploymentService:
 
             if self.deployment.deployment_type == DeploymentType.RESTART_ONLY:
                 await self._restart_only_deploy()
+            elif self.deployment.deployment_type == DeploymentType.UPLOAD:
+                await self._upload_deploy()
             else:
                 await self._full_deploy()
 
@@ -234,6 +236,43 @@ class DeploymentService:
         # Success
         await self._update_status(DeploymentStatus.SUCCESS)
         await self.logger.info("Restart-only deployment completed successfully")
+
+    async def _upload_deploy(self) -> None:
+        """Execute upload deployment (no clone, no build, use uploaded artifact).
+
+        Raises:
+            DeploymentError: If deployment fails
+        """
+        project = self.deployment.project
+        await self.logger.info(f"Starting upload deployment: {project.name}")
+
+        # Check if deployment has artifact
+        if not self.deployment.artifacts:
+            raise DeploymentError("No artifact found for upload deployment")
+
+        artifact = self.deployment.artifacts[0]
+        await self.logger.info(f"Using uploaded artifact: {artifact.file_path}")
+
+        # Step 1: Deploy to servers (skip clone and build)
+        await self._update_status(DeploymentStatus.DEPLOYING)
+        await self._deploy_to_servers(artifact.file_path)
+
+        if self._cancelled:
+            await self._handle_cancel()
+            return
+
+        # Step 2: Health check (if enabled)
+        if self.deployment.project.health_check_enabled:
+            await self._update_status(DeploymentStatus.HEALTH_CHECKING)
+            await self._perform_health_checks()
+
+            if self._cancelled:
+                await self._handle_cancel()
+                return
+
+        # Step 3: Success
+        await self._update_status(DeploymentStatus.SUCCESS)
+        await self.logger.info("Upload deployment completed successfully")
 
     async def _clone_repo(self) -> None:
         """Clone Git repository."""

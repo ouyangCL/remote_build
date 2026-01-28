@@ -1,9 +1,12 @@
 """Deployment management API routes."""
 import asyncio
+import hashlib
 import logging
+import tempfile
+from pathlib import Path
 from typing import cast
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -15,8 +18,8 @@ from app.models.audit_log import AuditAction
 from app.core.permissions import Permission
 from app.db.session import get_db
 from app.dependencies import get_current_user, get_current_user_from_token
-from app.models.deployment import Deployment, DeploymentLog, DeploymentStatus, DeploymentType
-from app.models.project import Project
+from app.models.deployment import Deployment, DeploymentArtifact, DeploymentLog, DeploymentStatus, DeploymentType, deployment_server_mappings
+from app.models.project import Project, ProjectType
 from app.models.server import ServerGroup
 from app.models.user import User, UserRole
 from app.schemas.deployment import (
@@ -42,6 +45,27 @@ def get_current_operator(
             detail="Deploy permission required (admin or operator role)",
         )
     return current_user
+
+
+def validate_upload_file(project_type: ProjectType, filename: str) -> None:
+    """验证上传文件类型"""
+    if project_type == ProjectType.JAVA:
+        if not filename.endswith('.jar'):
+            raise HTTPException(
+                status_code=400,
+                detail="Java项目请上传.jar文件"
+            )
+    elif project_type == ProjectType.FRONTEND:
+        if not filename.endswith('.zip'):
+            raise HTTPException(
+                status_code=400,
+                detail="前端项目请上传.zip压缩包"
+            )
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支持的项目类型: {project_type}"
+        )
 
 
 @router.get("", response_model=list[DeploymentResponse])
@@ -435,4 +459,160 @@ async def cancel_deployment(
         details={"branch": deployment.branch},
         ip_address=ip_address,
         user_agent=user_agent,
+    )
+
+
+@router.post("/upload", response_model=DeploymentResponse, status_code=status.HTTP_201_CREATED)
+async def create_upload_deployment(
+    project_id: int = Form(...),
+    server_group_ids: str = Form(...),  # 逗号分隔的字符串
+    file: UploadFile = File(...),
+    request: Request = None,
+    background_tasks: BackgroundTasks = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_operator),
+) -> Deployment:
+    """创建上传部署包类型的部署任务"""
+    # 解析服务器组ID列表
+    group_ids = [int(gid.strip()) for gid in server_group_ids.split(',')]
+
+    # 验证项目存在
+    project = db.query(Project).filter(Project.id == project_id).first()
+    if not project:
+        raise HTTPException(status_code=404, detail="项目不存在")
+
+    # 验证服务器组
+    server_groups = []
+    for group_id in group_ids:
+        group = db.query(ServerGroup).filter(ServerGroup.id == group_id).first()
+        if not group:
+            raise HTTPException(
+                status_code=404,
+                detail=f"服务器组 {group_id} 不存在"
+            )
+        server_groups.append(group)
+
+    # 验证环境一致性
+    EnvironmentService.validate_deployment_environment(project, server_groups)
+
+    # 验证文件类型
+    validate_upload_file(project.project_type, file.filename)
+
+    # 创建临时目录保存上传文件
+    temp_dir = Path(tempfile.gettempdir()) / "deployments"
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    # 读取文件内容
+    content = await file.read()
+
+    # 创建部署记录
+    deployment = Deployment(
+        project_id=project_id,
+        branch="upload",
+        deployment_type=DeploymentType.UPLOAD,
+        status=DeploymentStatus.PENDING,
+        created_by=current_user.id,
+        environment=project.environment,
+        total_steps=3,  # 上传->部署->健康检查
+    )
+    db.add(deployment)
+    db.commit()
+
+    # 保存上传文件
+    temp_file_path = temp_dir / f"{deployment.id}_{file.filename}"
+    temp_file_path.write_bytes(content)
+
+    # 创建 artifact 记录
+    checksum = hashlib.sha256(content).hexdigest()
+    artifact = DeploymentArtifact(
+        deployment_id=deployment.id,
+        file_path=str(temp_file_path),
+        file_size=len(content),
+        checksum=checksum,
+    )
+    db.add(artifact)
+
+    # 关联服务器组
+    for group_id in group_ids:
+        mapping = deployment_server_mappings.insert().values(
+            deployment_id=deployment.id,
+            server_group_id=group_id
+        )
+        db.execute(mapping)
+
+    db.commit()
+
+    # Log audit
+    ip_address = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    create_audit_log(
+        db=db,
+        user_id=current_user.id,
+        action=AuditAction.DEPLOYMENT_CREATE,
+        resource_type="deployment",
+        resource_id=deployment.id,
+        details={
+            "project": project.name,
+            "branch": "upload",
+            "environment": project.environment,
+            "deployment_type": "upload"
+        },
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+    # Check deployment concurrency limit
+    from app.services.deploy_service import get_concurrency_manager
+    concurrency_manager = get_concurrency_manager()
+
+    if not await concurrency_manager.acquire(deployment.id):
+        # Max concurrent deployments reached, update deployment status
+        deployment.status = DeploymentStatus.QUEUED
+        deployment.error_message = "Deployment queued: maximum concurrent deployments reached"
+        db.commit()
+
+        # Still return deployment but note it's queued
+        return cast(Deployment, deployment)
+
+    # 触发后台部署任务
+    def run_deployment_sync():
+        """Wrapper to run async deployment in background."""
+        # Create a new event loop for the background task
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+
+        async def _run():
+            try:
+                await execute_deployment(deployment.id)
+            except Exception as e:
+                logger.error(f"Background deployment task failed for deployment {deployment.id}: {e}")
+            finally:
+                # Clean up task reference when done
+                _background_tasks.pop(deployment.id, None)
+                # Also release concurrency slot
+                await get_concurrency_manager().release(deployment.id)
+
+        loop.run_until_complete(_run())
+        loop.close()
+
+    # Use FastAPI's BackgroundTasks - executes after response is sent
+    background_tasks.add_task(run_deployment_sync)
+
+    # Manually construct the response to avoid Pydantic from_attributes serialization
+    return DeploymentResponse(
+        id=deployment.id,
+        project_id=deployment.project_id,
+        branch=deployment.branch,
+        status=str(deployment.status),
+        deployment_type=deployment.deployment_type,
+        progress=deployment.progress,
+        current_step=deployment.current_step,
+        total_steps=deployment.total_steps,
+        commit_hash=deployment.commit_hash,
+        commit_message=deployment.commit_message,
+        error_message=deployment.error_message,
+        created_at=deployment.created_at,
+        created_by=deployment.created_by,
+        rollback_from=deployment.rollback_from,
+        environment=str(deployment.environment),
     )
