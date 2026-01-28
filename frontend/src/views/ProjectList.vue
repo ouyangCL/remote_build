@@ -256,12 +256,6 @@ const PROJECT_TEMPLATES: Record<string, { build_script: string; output_dir: stri
     upload_path: '/application/front/dist/temp',
     restart_script_path: '/application/front/restartFromTemp.sh',
   },
-  backend: {
-    build_script: 'npm run build',
-    output_dir: 'dist',
-    upload_path: '/application/back/temp',
-    restart_script_path: '/application/back/restartFromTemp.sh',
-  },
   java: {
     build_script: 'mvn clean package',
     output_dir: 'target',

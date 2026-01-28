@@ -16,7 +16,6 @@ class ProjectType(str, enum.Enum):
     """Project types."""
 
     FRONTEND = "frontend"
-    BACKEND = "backend"
     JAVA = "java"
 
 

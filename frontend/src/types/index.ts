@@ -56,7 +56,7 @@ export interface Project {
   git_url: string
   git_token?: string
   git_ssh_key?: string
-  project_type: 'frontend' | 'backend' | 'java'
+  project_type: 'frontend' | 'java'
   build_script: string
   deploy_script_path: string
   upload_path: string

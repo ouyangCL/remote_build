@@ -11,7 +11,7 @@ class ProjectBase(BaseModel):
     description: str | None = None
     git_url: str = Field(..., min_length=1, max_length=500)
     git_token: str | None = Field(None, description="Git access token for HTTPS private repositories")
-    project_type: str = Field(..., pattern="^(frontend|backend|java)$")
+    project_type: str = Field(..., pattern="^(frontend|java)$")
     build_script: str = Field(..., min_length=1)
     upload_path: str = Field(default="", max_length=255, description="Server-side path for uploading deployment packages")
     restart_script_path: str = Field(default="/opt/restart.sh", max_length=255, description="Server-side script to restart the application")
@@ -57,7 +57,7 @@ class ProjectUpdate(BaseModel):
     git_url: str | None = Field(None, min_length=1, max_length=500)
     git_token: str | None = Field(None, description="Git access token for HTTPS private repositories")
     git_ssh_key: str | None = Field(None, description="SSH private key for private repositories")
-    project_type: str | None = Field(None, pattern="^(frontend|backend|java)$")
+    project_type: str | None = Field(None, pattern="^(frontend|java)$")
     build_script: str | None = None
     upload_path: str | None = Field(None, max_length=255, description="Server-side path for uploading deployment packages")
     restart_script_path: str | None = Field(None, max_length=255, description="Server-side script to restart the application")
