@@ -256,7 +256,7 @@ class DeploymentService:
 
             # Step 1: Deploy to servers (skip clone and build)
             await self._update_status(DeploymentStatus.DEPLOYING)
-            await self._deploy_to_servers(artifact.file_path)
+            await self._deploy_to_servers(Path(artifact.file_path))
 
             if self._cancelled:
                 await self._handle_cancel()
